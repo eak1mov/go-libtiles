@@ -1,0 +1,7 @@
+*.tar.gz
+*.index
+*.tiles
+*.mbtiles
+*.pmtiles
+/pm_*
+/mb_*
