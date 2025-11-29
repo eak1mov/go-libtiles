@@ -1,3 +1,5 @@
+// Package spec provides low-level implementation of the PMTiles v3 specification,
+// including serialization/deserialization of headers and directories.
 package spec
 
 import (
@@ -70,8 +72,10 @@ const (
 	RootDirMaxLength       = HeaderRootDirMaxLength - HeaderLength
 )
 
-var ErrInvalidHeader = errors.New("invalid file header")
-var ErrInvalidVersion = errors.New("invalid version")
+var (
+	ErrInvalidHeader  = errors.New("libtiles: invalid pm file header")
+	ErrInvalidVersion = errors.New("libtiles: invalid pm version")
+)
 
 func SerializeHeader(header *Header) []byte {
 	var buffer bytes.Buffer
@@ -84,8 +88,7 @@ func SerializeHeader(header *Header) []byte {
 func DeserializeHeader(buffer []byte) (*Header, error) {
 	header := Header{}
 	reader := bytes.NewReader(buffer)
-	err := binary.Read(reader, binary.LittleEndian, &header)
-	if err != nil {
+	if err := binary.Read(reader, binary.LittleEndian, &header); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidHeader, err)
 	}
 	if header.HeaderMagic&headerMagicMask != headerMagic {

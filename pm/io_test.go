@@ -6,55 +6,65 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/eak1mov/go-libtiles/index"
+	"github.com/eak1mov/go-libtiles/internal"
 	"github.com/eak1mov/go-libtiles/pm"
-	tu "github.com/eak1mov/go-libtiles/pm/internal"
-	ti "github.com/eak1mov/go-libtiles/tileindex"
-	"github.com/stretchr/testify/require"
+	"github.com/eak1mov/go-libtiles/tile"
+	"github.com/google/go-cmp/cmp"
 )
 
-func tileId(item ti.IndexItem) pm.TileId {
-	return pm.TileId{X: item.X, Y: item.Y, Z: item.Z}
-}
-
 func TestWriterReader(t *testing.T) {
-	for testName, fileData := range tu.TestdataCases(t, "../testdata/input.tar.gz") {
+	for testName, fileData := range internal.TestdataCases(t, "../testdata/input.tar.gz") {
 		t.Run(testName, func(t *testing.T) {
 			t.Parallel()
 
-			indexItems, err := ti.ReadIndex(fileData)
-			require.NoError(t, err)
+			indexItems, err := index.ReadAll(fileData)
+			if err != nil {
+				t.Fatalf("index.ReadAll failed: %v", err)
+			}
 
-			tiles := make(map[pm.TileId][]byte)
+			tiles := make(map[tile.ID][]byte)
 			for _, item := range indexItems {
-				tiles[tileId(item)] = fmt.Appendf(nil, "%v-%v", item.Offset, item.Length)
+				tiles[item.TileID()] = fmt.Appendf(nil, "%v-%v", item.Offset, item.Length)
 			}
 
 			filePath := filepath.Join(t.TempDir(), "tiles.pmtiles")
 
 			writer, err := pm.NewWriter(filePath)
-			require.NoError(t, err)
+			if err != nil {
+				t.Fatalf("NewWriter failed: %v", err)
+			}
 			defer writer.Close()
 
 			for _, item := range indexItems {
-				tileData := tiles[tileId(item)]
-				err = writer.WriteTile(tileId(item), tileData)
-				require.NoError(t, err)
+				tileData := tiles[item.TileID()]
+				if err := writer.WriteTile(item.TileID(), tileData); err != nil {
+					t.Fatalf("WriteTile failed: %v", err)
+				}
 			}
 
-			err = writer.Finalize()
-			require.NoError(t, err)
+			if err := writer.Finalize(); err != nil {
+				t.Fatalf("Finalize failed: %v", err)
+			}
 
 			reader, err := pm.NewFileReader(filePath)
-			require.NoError(t, err)
+			if err != nil {
+				t.Fatalf("NewFileReader failed: %v", err)
+			}
 			defer reader.Close()
 
-			require.Equal(t, tiles, maps.Collect(reader.Tiles()))
+			if got, want := maps.Collect(tile.IterTiles(reader)), tiles; !cmp.Equal(got, want) {
+				t.Errorf("VisitTiles data mismatch")
+			}
 
 			for _, item := range indexItems[:min(10_000, len(indexItems))] {
-				expectedData := tiles[tileId(item)]
-				tileData, err := reader.ReadTile(tileId(item))
-				require.NoError(t, err)
-				require.Equalf(t, expectedData, tileData, "%v", item)
+				tileData, err := reader.ReadTile(item.TileID())
+				if err != nil {
+					t.Fatalf("ReadTile(%v) failed: %v", item.TileID(), err)
+				}
+				if got, want := tileData, tiles[item.TileID()]; !cmp.Equal(got, want) {
+					t.Fatalf("ReadTile(%v) = %v, want = %v", item.TileID(), got, want)
+				}
 			}
 		})
 	}

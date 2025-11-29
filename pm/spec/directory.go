@@ -1,7 +1,6 @@
 package spec
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/binary"
 	"math"
@@ -49,7 +48,7 @@ func SerializeDirectory(entries []Entry) []byte {
 }
 
 func DeserializeDirectory(data []byte) ([]Entry, error) {
-	byteReader := bufio.NewReader(bytes.NewBuffer(data))
+	byteReader := bytes.NewReader(data)
 
 	var err error
 	readUvarint := func() uint64 {

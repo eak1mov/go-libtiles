@@ -1,30 +1,37 @@
 package spec_test
 
 import (
-	"encoding/binary"
-	"errors"
 	"io"
 	"testing"
 
 	"github.com/eak1mov/go-libtiles/pm/spec"
-	"github.com/stretchr/testify/require"
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
 func TestHeaderLength(t *testing.T) {
-	require.Equal(t, binary.Size(spec.Header{}), spec.HeaderLength)
+	if got, want := len(spec.SerializeHeader(&spec.Header{})), spec.HeaderLength; got != want {
+		t.Errorf("SerializeHeader length = %v, want = %v", got, want)
+	}
 }
 
 func TestHeaderSerializer(t *testing.T) {
-	header1 := spec.Header{HeaderMagic: spec.HeaderMagicV3}
-	headerData := spec.SerializeHeader(&header1)
-	header2, err := spec.DeserializeHeader(headerData)
-	require.Nil(t, err)
-	require.Equal(t, header1, *header2)
+	input := spec.Header{HeaderMagic: spec.HeaderMagicV3}
+	got, err := spec.DeserializeHeader(spec.SerializeHeader(&input))
+	if err != nil {
+		t.Fatalf("DeserializeHeader failed: %v", err)
+	}
+	if diff := cmp.Diff(input, *got); diff != "" {
+		t.Errorf("DeserializeHeader(SerializeHeader(%v)) mismatch (-want +got):\n%s", input, diff)
+	}
 }
 
 func TestHeaderErrors(t *testing.T) {
-	buf := []byte("foobar")
-	_, err := spec.DeserializeHeader(buf)
-	require.Truef(t, errors.Is(err, spec.ErrInvalidHeader), "%v", err)
-	require.Truef(t, errors.Is(err, io.ErrUnexpectedEOF), "%v", err)
+	_, err := spec.DeserializeHeader([]byte("foobar"))
+	if got, want := err, spec.ErrInvalidHeader; !cmp.Equal(got, want, cmpopts.EquateErrors()) {
+		t.Errorf("DeserializeHeader(invalid data) = %q, want error presence = %q", got, want)
+	}
+	if got, want := err, io.ErrUnexpectedEOF; !cmp.Equal(got, want, cmpopts.EquateErrors()) {
+		t.Errorf("DeserializeHeader(invalid data) = %q, want error presence = %q", got, want)
+	}
 }

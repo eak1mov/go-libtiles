@@ -1,14 +1,15 @@
 package main
 
 import (
-	"database/sql"
 	"flag"
 	"fmt"
 	"log"
 	"log/slog"
 
+	"github.com/eak1mov/go-libtiles/mb"
 	"github.com/eak1mov/go-libtiles/pm"
 	"github.com/eak1mov/go-libtiles/pm/spec"
+	"github.com/eak1mov/go-libtiles/tile"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/schollz/progressbar/v3"
 )
@@ -41,8 +42,7 @@ func headerMetadata(metadata map[string]string) (pm.HeaderMetadata, error) {
 	boundsValue, boundsFound := metadata["bounds"]
 	if boundsFound {
 		var coords [4]float64
-		_, err := fmt.Sscanf(boundsValue, "%f,%f,%f,%f", &coords[0], &coords[1], &coords[2], &coords[3])
-		if err != nil {
+		if _, err := fmt.Sscanf(boundsValue, "%f,%f,%f,%f", &coords[0], &coords[1], &coords[2], &coords[3]); err != nil {
 			return header, err
 		}
 		header.MinLonE7 = int32(coords[0] * E7)
@@ -60,8 +60,7 @@ func headerMetadata(metadata map[string]string) (pm.HeaderMetadata, error) {
 	if centerFound {
 		var centerLat float64
 		var centerLon float64
-		_, err := fmt.Sscanf(centerValue, "%f,%f,%d", &centerLon, &centerLat, &header.CenterZoom)
-		if err != nil {
+		if _, err := fmt.Sscanf(centerValue, "%f,%f,%d", &centerLon, &centerLat, &header.CenterZoom); err != nil {
 			return header, err
 		}
 		header.CenterLonE7 = int32(centerLon * E7)
@@ -70,16 +69,14 @@ func headerMetadata(metadata map[string]string) (pm.HeaderMetadata, error) {
 
 	minzoomValue, minzoomFound := metadata["minzoom"]
 	if minzoomFound {
-		_, err := fmt.Sscanf(minzoomValue, "%d", &header.MinZoom)
-		if err != nil {
+		if _, err := fmt.Sscanf(minzoomValue, "%d", &header.MinZoom); err != nil {
 			return header, err
 		}
 	}
 
 	maxzoomValue, maxzoomFound := metadata["maxzoom"]
 	if maxzoomFound {
-		_, err := fmt.Sscanf(maxzoomValue, "%d", &header.MaxZoom)
-		if err != nil {
+		if _, err := fmt.Sscanf(maxzoomValue, "%d", &header.MaxZoom); err != nil {
 			return header, err
 		}
 	}
@@ -88,31 +85,15 @@ func headerMetadata(metadata map[string]string) (pm.HeaderMetadata, error) {
 }
 
 func importTiles(inputPath string, outputPath string) error {
-	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?mode=ro", inputPath))
+	reader, err := mb.NewReader(inputPath)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer reader.Close()
 
-	metadata := make(map[string]string)
-	{
-		rows, err := db.Query("SELECT name, value FROM metadata")
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var name, value string
-			if err := rows.Scan(&name, &value); err != nil {
-				return err
-			}
-			metadata[name] = value
-		}
-
-		if err = rows.Err(); err != nil {
-			return err
-		}
+	metadata, err := reader.ReadMetadata()
+	if err != nil {
+		return err
 	}
 
 	headerMetadata, err := headerMetadata(metadata)
@@ -121,59 +102,34 @@ func importTiles(inputPath string, outputPath string) error {
 	}
 
 	jsonValue, jsonFound := metadata["json"]
-	var jsonMetadata []byte = nil
+	var jsonMetadata []byte
 	if jsonFound {
-		jsonMetadata, _ = spec.Compress([]byte(jsonValue), spec.CompressionGzip)
+		jsonMetadata = []byte(jsonValue)
 	}
 
-	writerParams := pm.WriterParams{
-		Metadata:       jsonMetadata,
-		HeaderMetadata: headerMetadata,
-		Logger:         slog.Default(),
-	}
-	writer, err := pm.NewWriterParams(outputPath, writerParams)
+	writer, err := pm.NewWriter(
+		outputPath,
+		pm.WithMetadata(jsonMetadata),
+		pm.WithHeaderMetadata(headerMetadata),
+		pm.WithLogger(slog.Default()),
+	)
 	if err != nil {
 		return err
 	}
 	defer writer.Close()
 
-	{
-		rows, err := db.Query("SELECT tile_column, tile_row, zoom_level, tile_data FROM tiles")
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
+	bar := progressbar.New(-1)
+	err = reader.VisitTiles(func(tileID tile.ID, tileData []byte) error {
+		defer bar.Add(1)
+		return writer.WriteTile(tileID, tileData)
+	})
+	bar.Finish()
 
-		bar := progressbar.New(-1)
-
-		for rows.Next() {
-			var x, y, z uint32
-			var tileData []byte
-
-			if err := rows.Scan(&x, &y, &z, &tileData); err != nil {
-				return err
-			}
-
-			y = (1 << z) - 1 - y
-			tileId := pm.TileId{X: x, Y: y, Z: z}
-
-			err = writer.WriteTile(tileId, tileData)
-			if err != nil {
-				return err
-			}
-
-			bar.Add(1)
-		}
-
-		if err = rows.Err(); err != nil {
-			return err
-		}
-
-		bar.Finish()
+	if err != nil {
+		return err
 	}
 
-	err = writer.Finalize()
-	if err != nil {
+	if err := writer.Finalize(); err != nil {
 		return err
 	}
 
@@ -187,8 +143,7 @@ func main() {
 
 	slog.SetLogLoggerLevel(slog.LevelDebug)
 
-	err := importTiles(*inputPath, *outputPath)
-	if err != nil {
+	if err := importTiles(*inputPath, *outputPath); err != nil {
 		log.Fatal(err)
 	}
 }

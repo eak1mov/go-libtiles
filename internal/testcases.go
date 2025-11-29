@@ -7,18 +7,22 @@ import (
 	"iter"
 	"os"
 	"testing"
-
-	"github.com/stretchr/testify/require"
 )
 
 func TestdataCases(t *testing.T, filePath string) iter.Seq2[string, []byte] {
 	return func(yield func(string, []byte) bool) {
+		t.Helper()
+
 		file, err := os.Open(filePath)
-		require.NoError(t, err)
+		if err != nil {
+			t.Fatal(err)
+		}
 		defer file.Close()
 
 		gzReader, err := gzip.NewReader(file)
-		require.NoError(t, err)
+		if err != nil {
+			t.Fatal(err)
+		}
 		defer gzReader.Close()
 
 		tarReader := tar.NewReader(gzReader)
@@ -28,11 +32,17 @@ func TestdataCases(t *testing.T, filePath string) iter.Seq2[string, []byte] {
 			if err == io.EOF {
 				break
 			}
-			require.NoError(t, err)
-			require.True(t, hdr.Typeflag == tar.TypeReg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, want := hdr.Typeflag, tar.TypeReg; got != byte(want) {
+				t.Fatalf("hdr.Typeflag = %v, want = %v", got, want)
+			}
 
 			fileData, err := io.ReadAll(tarReader)
-			require.NoError(t, err)
+			if err != nil {
+				t.Fatal(err)
+			}
 
 			if !yield(hdr.Name, fileData) {
 				return

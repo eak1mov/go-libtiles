@@ -5,25 +5,26 @@ import (
 	"slices"
 	"testing"
 
-	tu "github.com/eak1mov/go-libtiles/pm/internal"
+	"github.com/eak1mov/go-libtiles/index"
+	"github.com/eak1mov/go-libtiles/internal"
 	"github.com/eak1mov/go-libtiles/pm/spec"
-	ti "github.com/eak1mov/go-libtiles/tileindex"
-	"github.com/stretchr/testify/require"
+	gcmp "github.com/google/go-cmp/cmp"
 )
 
 func TestDirectorySerializer(t *testing.T) {
-	for testName, fileData := range tu.TestdataCases(t, "../../testdata/input.tar.gz") {
+	for testName, fileData := range internal.TestdataCases(t, "../../testdata/input.tar.gz") {
 		t.Run(testName, func(t *testing.T) {
 			t.Parallel()
 
-			indexItems, err := ti.ReadIndex(fileData)
-			require.NoError(t, err)
+			indexItems, err := index.ReadAll(fileData)
+			if err != nil {
+				t.Fatalf("index.ReadAll failed: %v", err)
+			}
 
 			entries := make([]spec.Entry, 0)
 			for _, item := range indexItems {
-				tileId := spec.TileId{item.X, item.Y, item.Z}
 				entries = append(entries, spec.Entry{
-					TileCode:  spec.EncodeTileId(tileId),
+					TileCode:  spec.EncodeTileID(item.TileID()),
 					Offset:    item.Offset,
 					Length:    item.Length,
 					RunLength: 1,
@@ -34,9 +35,13 @@ func TestDirectorySerializer(t *testing.T) {
 				return cmp.Compare(a.TileCode, b.TileCode)
 			})
 
-			actualEntries, err := spec.DeserializeDirectory(spec.SerializeDirectory(entries))
-			require.NoError(t, err)
-			require.Equal(t, entries, actualEntries)
+			deserialized, err := spec.DeserializeDirectory(spec.SerializeDirectory(entries))
+			if err != nil {
+				t.Errorf("DeserializeDirectory failed: %v", err)
+			}
+			if !gcmp.Equal(entries, deserialized) {
+				t.Error("DeserializeDirectory(SerializeDirectory(input)) != input")
+			}
 		})
 	}
 }

@@ -2,25 +2,25 @@ package main
 
 import (
 	"bufio"
-	"database/sql"
 	"encoding/binary"
 	"flag"
-	"fmt"
 	"log"
 	"log/slog"
 	"os"
 
-	ti "github.com/eak1mov/go-libtiles/tileindex"
+	"github.com/eak1mov/go-libtiles/index"
+	"github.com/eak1mov/go-libtiles/mb"
+	"github.com/eak1mov/go-libtiles/tile"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/schollz/progressbar/v3"
 )
 
 func exportTiles(inputPath string, outputIndexPath string, outputTilesPath string) error {
-	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?mode=ro", inputPath))
+	reader, err := mb.NewReader(inputPath)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer reader.Close()
 
 	indexFile, err := os.Create(outputIndexPath)
 	if err != nil {
@@ -37,27 +37,13 @@ func exportTiles(inputPath string, outputIndexPath string, outputTilesPath strin
 	tilesWriter := bufio.NewWriter(tilesFile)
 	tilesOffset := uint64(0)
 
-	rows, err := db.Query("SELECT tile_column, tile_row, zoom_level, tile_data FROM tiles")
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
 	bar := progressbar.New(-1)
 
-	for rows.Next() {
-		var x, y, z uint32
-		var tileData []byte
-
-		if err := rows.Scan(&x, &y, &z, &tileData); err != nil {
-			return err
-		}
-
-		y = (1 << z) - 1 - y
-		indexItem := ti.IndexItem{
-			X:      x,
-			Y:      y,
-			Z:      z,
+	err = reader.VisitTiles(func(tileID tile.ID, tileData []byte) error {
+		indexItem := index.Item{
+			X:      tileID.X,
+			Y:      tileID.Y,
+			Z:      tileID.Z,
 			Length: uint32(len(tileData)),
 			Offset: tilesOffset,
 		}
@@ -73,18 +59,20 @@ func exportTiles(inputPath string, outputIndexPath string, outputTilesPath strin
 		tilesOffset += uint64(len(tileData))
 
 		bar.Add(1)
-	}
+
+		return nil
+	})
 
 	bar.Finish()
 
-	if err = rows.Err(); err != nil {
+	if err != nil {
 		return err
 	}
 
-	if err = tilesWriter.Flush(); err != nil {
+	if err := tilesWriter.Flush(); err != nil {
 		return err
 	}
-	if err = indexWriter.Flush(); err != nil {
+	if err := indexWriter.Flush(); err != nil {
 		return err
 	}
 
@@ -99,8 +87,7 @@ func main() {
 
 	slog.SetLogLoggerLevel(slog.LevelDebug)
 
-	err := exportTiles(*inputPath, *outputIndexPath, *outputTilesPath)
-	if err != nil {
+	if err := exportTiles(*inputPath, *outputIndexPath, *outputTilesPath); err != nil {
 		log.Fatal(err)
 	}
 }

@@ -10,22 +10,11 @@ import (
 	"slices"
 
 	"github.com/eak1mov/go-libtiles/pm/spec"
+	"github.com/eak1mov/go-libtiles/tile"
 )
 
-type Writer interface {
-	io.Closer
-
-	WriteTile(tileId TileId, tileData []byte) error
-	Finalize() error
-}
-
-type WriterParams struct {
-	Metadata       []byte
-	HeaderMetadata HeaderMetadata
-	Logger         *slog.Logger
-}
-
-type writer struct {
+// Writer implements tile.Writer interface for PMTiles format.
+type Writer struct {
 	logger *slog.Logger
 	file   *os.File
 	header spec.Header
@@ -37,16 +26,37 @@ type writer struct {
 	locations map[[16]byte]uint32 // hash -> entry index
 }
 
-func NewWriter(filePath string) (Writer, error) {
-	return NewWriterParams(filePath, WriterParams{})
+type writerConfig struct {
+	Metadata       []byte
+	HeaderMetadata HeaderMetadata
+	Logger         *slog.Logger
 }
 
-func NewWriterParams(filePath string, params WriterParams) (w Writer, err error) {
-	logger := params.Logger
-	if logger == nil {
-		logger = slog.New(slog.DiscardHandler)
+type WriterOption func(*writerConfig)
+
+func WithHeaderMetadata(headerMetadata HeaderMetadata) WriterOption {
+	return func(c *writerConfig) { c.HeaderMetadata = headerMetadata }
+}
+
+func WithMetadata(metadata []byte) WriterOption {
+	return func(c *writerConfig) { c.Metadata = metadata }
+}
+
+func WithLogger(logger *slog.Logger) WriterOption {
+	return func(c *writerConfig) { c.Logger = logger }
+}
+
+// NewWriter creates a new Writer for writing to a PMTiles file.
+// It applies given options and initializes file for writing tiles.
+func NewWriter(filePath string, opts ...WriterOption) (*Writer, error) {
+	config := writerConfig{
+		Logger: slog.New(slog.DiscardHandler),
+	}
+	for _, opt := range opts {
+		opt(&config)
 	}
 
+	var err error
 	file, err := os.Create(filePath)
 	if err != nil {
 		return nil, err
@@ -57,32 +67,32 @@ func NewWriterParams(filePath string, params WriterParams) (w Writer, err error)
 		}
 	}()
 
-	header := spec.Header{}
-	offset := uint64(spec.HeaderRootDirMaxLength)
+	header := spec.Header{
+		HeaderMagic:         spec.HeaderMagicV3,
+		Clustered:           true,
+		InternalCompression: spec.CompressionGzip,
+	}
+	config.HeaderMetadata.CopyToHeader(&header)
 
-	_, err = file.Seek(int64(offset), io.SeekStart)
-	if err != nil {
+	offset := uint64(spec.HeaderRootDirMaxLength)
+	if _, err = file.Seek(int64(offset), io.SeekStart); err != nil {
 		return nil, err
 	}
 
-	if params.Metadata != nil {
-		_, err := file.Write(params.Metadata)
-		if err != nil {
+	if config.Metadata != nil {
+		metadata, _ := spec.Compress(config.Metadata, header.InternalCompression)
+		if _, err = file.Write(metadata); err != nil {
 			return nil, err
 		}
 		header.MetadataOffset = offset
-		header.MetadataLength = uint64(len(params.Metadata))
+		header.MetadataLength = uint64(len(config.Metadata))
 		offset += header.MetadataLength
 	}
 
-	header.HeaderMagic = spec.HeaderMagicV3
-	header.Clustered = true
-	header.InternalCompression = spec.CompressionGzip
 	header.TileDataOffset = offset
-	params.HeaderMetadata.CopyToHeader(&header)
 
-	return &writer{
-		logger:     logger,
+	return &Writer{
+		logger:     config.Logger,
 		file:       file,
 		header:     header,
 		tileWriter: bufio.NewWriter(file),
@@ -91,7 +101,7 @@ func NewWriterParams(filePath string, params WriterParams) (w Writer, err error)
 	}, nil
 }
 
-func (w *writer) WriteTile(tileId TileId, tileData []byte) error {
+func (w *Writer) WriteTile(tileID tile.ID, tileData []byte) error {
 	if len(tileData) == 0 {
 		return nil
 	}
@@ -101,7 +111,7 @@ func (w *writer) WriteTile(tileId TileId, tileData []byte) error {
 
 	if exists {
 		entry := spec.Entry{
-			TileCode:  spec.EncodeTileId(tileId),
+			TileCode:  spec.EncodeTileID(tileID),
 			Offset:    w.entries[entryIdx].Offset,
 			Length:    w.entries[entryIdx].Length,
 			RunLength: 1,
@@ -111,14 +121,13 @@ func (w *writer) WriteTile(tileId TileId, tileData []byte) error {
 	}
 
 	entry := spec.Entry{
-		TileCode:  spec.EncodeTileId(tileId),
+		TileCode:  spec.EncodeTileID(tileID),
 		Offset:    w.tileOffset,
 		Length:    uint32(len(tileData)),
 		RunLength: 1,
 	}
 
-	_, err := w.tileWriter.Write(tileData)
-	if err != nil {
+	if _, err := w.tileWriter.Write(tileData); err != nil {
 		return err
 	}
 
@@ -130,14 +139,13 @@ func (w *writer) WriteTile(tileId TileId, tileData []byte) error {
 	return nil
 }
 
-func (w *writer) Finalize() error {
+func (w *Writer) Finalize() error {
 	if w.tileWriter == nil {
 		panic("libtiles: finalize called twice")
 	}
 
 	w.logger.Debug("libtiles: flush")
-	err := w.tileWriter.Flush()
-	if err != nil {
+	if err := w.tileWriter.Flush(); err != nil {
 		return err
 	}
 	w.header.TileDataLength = w.tileOffset
@@ -159,39 +167,33 @@ func (w *writer) Finalize() error {
 	if err != nil {
 		return err
 	}
-	_, err = w.file.Write(leavesBytes)
-	if err != nil {
+	if _, err := w.file.Write(leavesBytes); err != nil {
 		return err
 	}
 	w.header.LeafDirectoryOffset = uint64(leavesOffset)
 	w.header.LeafDirectoryLength = uint64(len(leavesBytes))
 
 	w.logger.Debug("libtiles: write root")
-	_, err = w.file.Seek(spec.RootDirOffset, io.SeekStart)
-	if err != nil {
+	if _, err := w.file.Seek(spec.RootDirOffset, io.SeekStart); err != nil {
 		return err
 	}
-	_, err = w.file.Write(rootBytes)
-	if err != nil {
+	if _, err := w.file.Write(rootBytes); err != nil {
 		return err
 	}
 	w.header.RootOffset = spec.RootDirOffset
 	w.header.RootLength = uint64(len(rootBytes))
 
 	w.logger.Debug("libtiles: write header")
-	_, err = w.file.Seek(0, io.SeekStart)
-	if err != nil {
+	if _, err := w.file.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
 	headerData := spec.SerializeHeader(&w.header)
-	_, err = w.file.Write(headerData)
-	if err != nil {
+	if _, err := w.file.Write(headerData); err != nil {
 		return err
 	}
 
 	w.logger.Debug("libtiles: flush")
-	err = w.file.Close()
-	if err != nil {
+	if err := w.file.Close(); err != nil {
 		return err
 	}
 	w.file = nil
@@ -200,7 +202,7 @@ func (w *writer) Finalize() error {
 	return nil
 }
 
-func (w *writer) Close() error {
+func (w *Writer) Close() error {
 	if w.file == nil {
 		return nil
 	}

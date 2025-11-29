@@ -1,8 +1,9 @@
+// Package pm provides high-level API for reading and writing tiles, metadata and headers in PMTiles format.
 package pm
 
-import "github.com/eak1mov/go-libtiles/pm/spec"
-
-type TileId = spec.TileId
+import (
+	"github.com/eak1mov/go-libtiles/pm/spec"
+)
 
 type HeaderMetadata struct {
 	TileCompression spec.Compression

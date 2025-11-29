@@ -7,8 +7,9 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/eak1mov/go-libtiles/index"
 	"github.com/eak1mov/go-libtiles/pm"
-	ti "github.com/eak1mov/go-libtiles/tileindex"
+	"github.com/eak1mov/go-libtiles/tile"
 )
 
 func exportIndex(inputPath string, outputPath string) error {
@@ -18,12 +19,12 @@ func exportIndex(inputPath string, outputPath string) error {
 	}
 	defer reader.Close()
 
-	indexItems := make([]ti.IndexItem, 0)
-	for tileId, tileLocation := range reader.TileLocations() {
-		indexItems = append(indexItems, ti.IndexItem{
-			X:      tileId.X,
-			Y:      tileId.Y,
-			Z:      tileId.Z,
+	indexItems := make([]index.Item, 0)
+	for tileID, tileLocation := range tile.IterLocations(reader) {
+		indexItems = append(indexItems, index.Item{
+			X:      tileID.X,
+			Y:      tileID.Y,
+			Z:      tileID.Z,
 			Length: uint32(tileLocation.Length),
 			Offset: tileLocation.Offset,
 		})
@@ -36,13 +37,11 @@ func exportIndex(inputPath string, outputPath string) error {
 	defer file.Close()
 
 	writer := bufio.NewWriter(file)
-	err = ti.WriteIndex(indexItems, writer)
-	if err != nil {
+	if err := index.WriteAll(indexItems, writer); err != nil {
 		return err
 	}
 
-	err = writer.Flush()
-	if err != nil {
+	if err := writer.Flush(); err != nil {
 		return err
 	}
 
@@ -56,8 +55,7 @@ func main() {
 
 	slog.SetLogLoggerLevel(slog.LevelDebug)
 
-	err := exportIndex(*inputPath, *outputPath)
-	if err != nil {
+	if err := exportIndex(*inputPath, *outputPath); err != nil {
 		log.Fatal(err)
 	}
 }

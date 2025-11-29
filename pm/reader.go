@@ -1,44 +1,26 @@
 package pm
 
 import (
-	"errors"
-	"io"
-	"iter"
 	"os"
 
 	"github.com/eak1mov/go-libtiles/pm/spec"
+	"github.com/eak1mov/go-libtiles/tile"
 )
 
-type Reader interface {
-	io.Closer
-
-	HeaderMetadata() HeaderMetadata
-	ReadMetadata() ([]byte, error)
-
-	ReadTile(tileId TileId) ([]byte, error)
-	ReadLocation(tileId TileId) (Location, error)
-
-	Tiles() iter.Seq2[TileId, []byte]
-	VisitTiles(visitor func(TileId, []byte) error) error
-
-	TileLocations() iter.Seq2[TileId, Location]
-	VisitTileLocations(visitor func(TileId, Location) error) error
-}
-
-type Location struct {
-	Offset uint64
-	Length uint64
-}
-
+// FileAccessFunc is a function to access file data (local or remote).
+// It must ensure that there are no partial reads.
+// TODO(eak1mov): specify zero-length reads
 type FileAccessFunc = func(offset, length uint64) ([]byte, error)
 
-type reader struct {
+// Reader implements tile.Reader and tile.LocationReader interfaces for PMTiles format.
+type Reader struct {
 	fileAccess FileAccessFunc
 	fileCloser func() error
 	header     *spec.Header
 }
 
-func NewFileReader(filePath string) (Reader, error) {
+// NewFileReader opens a local PMTiles file and returns a Reader for it.
+func NewFileReader(filePath string) (*Reader, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -58,14 +40,16 @@ func NewFileReader(filePath string) (Reader, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &reader{
+	return &Reader{
 		fileAccess: fileAccess,
 		fileCloser: func() error { return file.Close() },
 		header:     header,
 	}, nil
 }
 
-func NewReader(fileAccess FileAccessFunc) (Reader, error) {
+// NewReader creates a Reader using a custom file access function.
+// This is useful for remote or in-memory access.
+func NewReader(fileAccess FileAccessFunc) (*Reader, error) {
 	headerData, err := fileAccess(0, spec.HeaderLength)
 	if err != nil {
 		return nil, err
@@ -74,32 +58,38 @@ func NewReader(fileAccess FileAccessFunc) (Reader, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &reader{
+	return &Reader{
 		fileAccess: fileAccess,
 		fileCloser: func() error { return nil },
 		header:     header,
 	}, nil
 }
 
-// TODO: add directory cache (offset -> []Entry) and reader with cache
+// TODO(eak1mov): add directory cache (offset -> []Entry) and reader with cache
 // func NewCachingFileReader(filePath string) (Reader, error)
 // func NewCachingReader(fileAccess FileAccessFunc) (Reader, error)
 
-func (r *reader) Close() error {
+func (r *Reader) Close() error {
 	return r.fileCloser()
 }
 
-func (r *reader) HeaderMetadata() HeaderMetadata {
+// HeaderMetadata returns the metadata from the PMTiles header.
+func (r *Reader) HeaderMetadata() HeaderMetadata {
 	result := HeaderMetadata{}
 	result.CopyFromHeader(r.header)
 	return result
 }
 
-func (r *reader) ReadMetadata() ([]byte, error) {
-	return r.fileAccess(r.header.MetadataOffset, r.header.MetadataLength)
+// ReadMetadata reads and returns the raw metadata from the PMTiles file.
+func (r *Reader) ReadMetadata() ([]byte, error) {
+	metadata, err := r.fileAccess(r.header.MetadataOffset, r.header.MetadataLength)
+	if err != nil {
+		return nil, err
+	}
+	return spec.Decompress(metadata, r.header.InternalCompression)
 }
 
-func (r *reader) readDirectory(dirOffset, dirLength uint64) ([]spec.Entry, error) {
+func (r *Reader) readDirectory(dirOffset, dirLength uint64) ([]spec.Entry, error) {
 	dirCompressed, err := r.fileAccess(dirOffset, dirLength)
 	if err != nil {
 		return nil, err
@@ -115,20 +105,20 @@ func (r *reader) readDirectory(dirOffset, dirLength uint64) ([]spec.Entry, error
 	return dirEntries, nil
 }
 
-func (r *reader) ReadLocation(tileId TileId) (Location, error) {
+func (r *Reader) ReadLocation(tileID tile.ID) (tile.Location, error) {
 	dirOffset := r.header.RootOffset
 	dirLength := r.header.RootLength
 	for {
 		dirEntries, err := r.readDirectory(dirOffset, dirLength)
 		if err != nil {
-			return Location{}, err
+			return tile.Location{}, err
 		}
-		entry, found := spec.FindEntry(dirEntries, spec.EncodeTileId(tileId))
+		entry, found := spec.FindEntry(dirEntries, spec.EncodeTileID(tileID))
 		if !found {
-			return Location{}, nil
+			return tile.Location{}, nil
 		}
 		if entry.RunLength > 0 {
-			return Location{
+			return tile.Location{
 				Offset: r.header.TileDataOffset + entry.Offset,
 				Length: uint64(entry.Length),
 			}, nil
@@ -138,16 +128,15 @@ func (r *reader) ReadLocation(tileId TileId) (Location, error) {
 	}
 }
 
-func (r *reader) ReadTile(tileId TileId) ([]byte, error) {
-	location, err := r.ReadLocation(tileId)
+func (r *Reader) ReadTile(tileID tile.ID) ([]byte, error) {
+	location, err := r.ReadLocation(tileID)
 	if err != nil {
 		return nil, err
 	}
-	tileData, err := r.fileAccess(location.Offset, location.Length)
-	return tileData, err
+	return r.fileAccess(location.Offset, location.Length)
 }
 
-func (r *reader) VisitTileLocations(visitor func(TileId, Location) error) error {
+func (r *Reader) VisitLocations(visitor func(tile.ID, tile.Location) error) error {
 	var traverse func(uint64, uint64) error
 	traverse = func(dirOffset, dirLength uint64) error {
 		dirEntries, err := r.readDirectory(dirOffset, dirLength)
@@ -157,20 +146,17 @@ func (r *reader) VisitTileLocations(visitor func(TileId, Location) error) error 
 		for _, entry := range dirEntries {
 			if entry.RunLength > 0 {
 				for i := range entry.RunLength {
-					tileId := spec.DecodeTileId(entry.TileCode + uint64(i))
-					location := Location{
+					tileID := spec.DecodeTileID(entry.TileCode + uint64(i))
+					location := tile.Location{
 						Offset: r.header.TileDataOffset + entry.Offset,
 						Length: uint64(entry.Length),
 					}
-
-					err := visitor(tileId, location)
-					if err != nil {
+					if err := visitor(tileID, location); err != nil {
 						return err
 					}
 				}
 			} else {
-				err := traverse(r.header.LeafDirectoryOffset+entry.Offset, uint64(entry.Length))
-				if err != nil {
+				if err := traverse(r.header.LeafDirectoryOffset+entry.Offset, uint64(entry.Length)); err != nil {
 					return err
 				}
 			}
@@ -180,43 +166,12 @@ func (r *reader) VisitTileLocations(visitor func(TileId, Location) error) error 
 	return traverse(r.header.RootOffset, r.header.RootLength)
 }
 
-var errVisitCancelled = errors.New("cancelled")
-
-// panics on any error from fileAccess
-func (r *reader) TileLocations() iter.Seq2[TileId, Location] {
-	return func(yield func(TileId, Location) bool) {
-		err := r.VisitTileLocations(func(tileId TileId, location Location) error {
-			if !yield(tileId, location) {
-				return errVisitCancelled
-			}
-			return nil
-		})
-		if err != nil && err != errVisitCancelled {
-			panic(err)
-		}
-	}
-}
-
-func (r *reader) VisitTiles(visitor func(TileId, []byte) error) error {
-	return r.VisitTileLocations(func(tileId TileId, location Location) error {
+func (r *Reader) VisitTiles(visitor func(tile.ID, []byte) error) error {
+	return r.VisitLocations(func(tileID tile.ID, location tile.Location) error {
 		tileData, err := r.fileAccess(location.Offset, location.Length)
 		if err != nil {
 			return err
 		}
-		return visitor(tileId, tileData)
+		return visitor(tileID, tileData)
 	})
-}
-
-func (r *reader) Tiles() iter.Seq2[TileId, []byte] {
-	return func(yield func(TileId, []byte) bool) {
-		err := r.VisitTiles(func(tileId TileId, tileData []byte) error {
-			if !yield(tileId, tileData) {
-				return errVisitCancelled
-			}
-			return nil
-		})
-		if err != nil && err != errVisitCancelled {
-			panic(err)
-		}
-	}
 }

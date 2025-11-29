@@ -19,13 +19,11 @@ func Compress(data []byte, compression Compression) ([]byte, error) {
 	var buffer bytes.Buffer
 	writer, _ := gzip.NewWriterLevel(&buffer, gzip.BestCompression)
 
-	_, err := writer.Write(data)
-	if err != nil {
+	if _, err := writer.Write(data); err != nil {
 		return nil, fmt.Errorf("failed to compress: %w", err)
 	}
 
-	err = writer.Close()
-	if err != nil {
+	if err := writer.Close(); err != nil {
 		return nil, fmt.Errorf("failed to compress: %w", err)
 	}
 
