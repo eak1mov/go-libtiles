@@ -12,13 +12,24 @@ func (t ID) Valid() bool {
 	return t.Z < 32 && t.X < (1<<t.Z) && t.Y < (1<<t.Z)
 }
 
-// Reader defines an interface for reading tiles from a tileset.
+// Writer defines an interface for writing tiles to a tileset.
+type Writer interface {
+	// WriteTile writes a single tile to the tileset.
+	WriteTile(tileID ID, tileData []byte) error
+
+	// Finalize completes the writing process: flushes buffers, writes header and indices.
+	// It must be called before closing the Writer.
+	Finalize() error
+}
+
 type Reader interface {
 	// ReadTile reads a single tile from the tileset.
 	// It returns the tile data or an error if the tile cannot be read.
 	// If the tile does not exist, it returns an empty slice with no error.
 	ReadTile(tileID ID) ([]byte, error)
+}
 
+type Visitor interface {
 	// VisitTiles visits all tiles in the tileset, calling the visitor for each.
 	// It returns an error if visiting fails.
 	// Order of tiles, upfront cpu and memory consumption are implementation-defined.
@@ -33,16 +44,8 @@ type Location struct {
 
 type LocationReader interface {
 	ReadLocation(tileID ID) (Location, error)
-
-	VisitLocations(visitor func(ID, Location) error) error
 }
 
-// Writer defines an interface for writing tiles to a tileset.
-type Writer interface {
-	// WriteTile writes a single tile to the tileset.
-	WriteTile(tileID ID, tileData []byte) error
-
-	// Finalize completes the writing process: flushes buffers, writes header and indices.
-	// It must be called before closing the Writer.
-	Finalize() error
+type LocationVisitor interface {
+	VisitLocations(visitor func(ID, Location) error) error
 }

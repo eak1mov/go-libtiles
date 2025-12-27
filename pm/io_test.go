@@ -14,11 +14,23 @@ import (
 )
 
 func TestWriterReader(t *testing.T) {
-	for testName, fileData := range internal.TestdataCases(t, "../testdata/input.tar.gz") {
-		t.Run(testName, func(t *testing.T) {
+	for _, tc := range []string{
+		"empty.index",
+		"full5.index",
+		"full08.index",
+		"small.index",
+		"medium.index",
+		"large.index",
+	} {
+		t.Run(tc, func(t *testing.T) {
 			t.Parallel()
 
-			indexItems, err := index.ReadAll(fileData)
+			testData, err := internal.ReadTestdata("../testdata/input.zip", tc)
+			if err != nil {
+				t.Fatalf("failed to read test data: %v", err)
+			}
+
+			indexItems, err := index.ReadAll(testData)
 			if err != nil {
 				t.Fatalf("index.ReadAll failed: %v", err)
 			}
@@ -29,8 +41,9 @@ func TestWriterReader(t *testing.T) {
 			}
 
 			filePath := filepath.Join(t.TempDir(), "tiles.pmtiles")
+			writerMetadata := []byte(`{"foo":"bar"}`)
 
-			writer, err := pm.NewWriter(filePath)
+			writer, err := pm.NewWriter(filePath, pm.WithMetadata(writerMetadata))
 			if err != nil {
 				t.Fatalf("NewWriter failed: %v", err)
 			}
@@ -52,6 +65,14 @@ func TestWriterReader(t *testing.T) {
 				t.Fatalf("NewFileReader failed: %v", err)
 			}
 			defer reader.Close()
+
+			readerMetadata, err := reader.ReadMetadata()
+			if err != nil {
+				t.Fatalf("ReadMetadata failed: %v", err)
+			}
+			if got, want := readerMetadata, writerMetadata; !cmp.Equal(got, want) {
+				t.Errorf("ReadMetadata data mismatch")
+			}
 
 			if got, want := maps.Collect(tile.IterTiles(reader)), tiles; !cmp.Equal(got, want) {
 				t.Errorf("VisitTiles data mismatch")

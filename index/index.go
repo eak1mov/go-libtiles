@@ -9,7 +9,7 @@ import (
 	"github.com/eak1mov/go-libtiles/tile"
 )
 
-// Item represents a single record in the index, mapping tile coordinate (X, Y, Z)
+// Item represents a single record in the index, mapping tile coordinates (X, Y, Z)
 // to its location (Offset, Length) in the tile storage file.
 // It is designed to be easily portable to other languages and utilities.
 type Item struct {

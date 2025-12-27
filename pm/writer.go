@@ -4,8 +4,9 @@ import (
 	"bufio"
 	"cmp"
 	"crypto/md5"
+	"fmt"
 	"io"
-	"log/slog"
+	"log"
 	"os"
 	"slices"
 
@@ -15,7 +16,7 @@ import (
 
 // Writer implements tile.Writer interface for PMTiles format.
 type Writer struct {
-	logger *slog.Logger
+	logger *log.Logger
 	file   *os.File
 	header spec.Header
 
@@ -29,7 +30,7 @@ type Writer struct {
 type writerConfig struct {
 	Metadata       []byte
 	HeaderMetadata HeaderMetadata
-	Logger         *slog.Logger
+	Logger         *log.Logger
 }
 
 type WriterOption func(*writerConfig)
@@ -42,15 +43,22 @@ func WithMetadata(metadata []byte) WriterOption {
 	return func(c *writerConfig) { c.Metadata = metadata }
 }
 
-func WithLogger(logger *slog.Logger) WriterOption {
+// WithLogger sets custom logger, otherwise log messages are discarded.
+func WithLogger(logger *log.Logger) WriterOption {
 	return func(c *writerConfig) { c.Logger = logger }
 }
 
 // NewWriter creates a new Writer for writing to a PMTiles file.
-// It applies given options and initializes file for writing tiles.
+// It always creates a new file and does not support appending to an existing one.
+//
+// Finalize() must be called to complete writing. Failure to do so will result
+// in a corrupted file.
+//
+// On any error during writing, the file may be left in an invalid state.
+// Close() should always be called to release file resources.
 func NewWriter(filePath string, opts ...WriterOption) (*Writer, error) {
 	config := writerConfig{
-		Logger: slog.New(slog.DiscardHandler),
+		Logger: log.New(io.Discard, "", log.LstdFlags),
 	}
 	for _, opt := range opts {
 		opt(&config)
@@ -85,7 +93,7 @@ func NewWriter(filePath string, opts ...WriterOption) (*Writer, error) {
 			return nil, err
 		}
 		header.MetadataOffset = offset
-		header.MetadataLength = uint64(len(config.Metadata))
+		header.MetadataLength = uint64(len(metadata))
 		offset += header.MetadataLength
 	}
 
@@ -101,7 +109,18 @@ func NewWriter(filePath string, opts ...WriterOption) (*Writer, error) {
 	}, nil
 }
 
+func (w *Writer) Close() error {
+	return w.file.Close()
+}
+
+// WriteTile writes a single tile to the PMTiles file.
+//
+// The caller is responsible for compressing the data according to TileCompression.
 func (w *Writer) WriteTile(tileID tile.ID, tileData []byte) error {
+	if w.tileWriter == nil {
+		return fmt.Errorf("libtiles: write called after finalize")
+	}
+
 	if len(tileData) == 0 {
 		return nil
 	}
@@ -139,30 +158,35 @@ func (w *Writer) WriteTile(tileID tile.ID, tileData []byte) error {
 	return nil
 }
 
+// Finalize completes the writing process by flushing buffers, writing headers,
+// and creating indexes. It must be called before Close.
+//
+// After Finalize is called, WriteTile must not be called again.
+// If Finalize returns an error, the output file may be left in a corrupted state.
 func (w *Writer) Finalize() error {
 	if w.tileWriter == nil {
-		panic("libtiles: finalize called twice")
+		return fmt.Errorf("libtiles: finalize called twice")
 	}
 
-	w.logger.Debug("libtiles: flush")
+	w.logger.Println("libtiles: flush")
 	if err := w.tileWriter.Flush(); err != nil {
 		return err
 	}
 	w.header.TileDataLength = w.tileOffset
 	w.tileWriter = nil
 
-	w.logger.Debug("libtiles: sort")
+	w.logger.Println("libtiles: sort")
 	slices.SortFunc(w.entries, func(a, b spec.Entry) int {
 		return cmp.Compare(a.TileCode, b.TileCode)
 	})
 
-	w.logger.Debug("libtiles: compact")
+	w.logger.Println("libtiles: compact")
 	w.entries = spec.CompactEntries(w.entries)
 
-	w.logger.Debug("libtiles: serialize")
+	w.logger.Println("libtiles: serialize")
 	rootBytes, leavesBytes := spec.SerializeAll(w.entries, w.header.InternalCompression)
 
-	w.logger.Debug("libtiles: write leaves")
+	w.logger.Println("libtiles: write leaves")
 	leavesOffset, err := w.file.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return err
@@ -173,7 +197,7 @@ func (w *Writer) Finalize() error {
 	w.header.LeafDirectoryOffset = uint64(leavesOffset)
 	w.header.LeafDirectoryLength = uint64(len(leavesBytes))
 
-	w.logger.Debug("libtiles: write root")
+	w.logger.Println("libtiles: write root")
 	if _, err := w.file.Seek(spec.RootDirOffset, io.SeekStart); err != nil {
 		return err
 	}
@@ -183,7 +207,7 @@ func (w *Writer) Finalize() error {
 	w.header.RootOffset = spec.RootDirOffset
 	w.header.RootLength = uint64(len(rootBytes))
 
-	w.logger.Debug("libtiles: write header")
+	w.logger.Println("libtiles: write header")
 	if _, err := w.file.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
@@ -192,19 +216,11 @@ func (w *Writer) Finalize() error {
 		return err
 	}
 
-	w.logger.Debug("libtiles: flush")
-	if err := w.file.Close(); err != nil {
+	w.logger.Println("libtiles: flush")
+	if err := w.file.Sync(); err != nil {
 		return err
 	}
-	w.file = nil
 
-	w.logger.Debug("libtiles: done!")
+	w.logger.Println("libtiles: done!")
 	return nil
-}
-
-func (w *Writer) Close() error {
-	if w.file == nil {
-		return nil
-	}
-	return w.file.Close()
 }

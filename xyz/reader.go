@@ -1,7 +1,9 @@
 package xyz
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -24,12 +26,10 @@ func NewReader(filePattern string) (*Reader, error) {
 		return nil, err
 	}
 
-	// TODO(eak1mov): make filePattern regexp-safe?
-	// regexPattern := regexp.QuoteMeta(filePattern)
-	regexPattern := filePattern
-	regexPattern = strings.ReplaceAll(regexPattern, "{x}", "(?P<x>\\d+)")
-	regexPattern = strings.ReplaceAll(regexPattern, "{y}", "(?P<y>\\d+)")
-	regexPattern = strings.ReplaceAll(regexPattern, "{z}", "(?P<z>\\d+)")
+	regexPattern := regexp.QuoteMeta(filePattern)
+	regexPattern = strings.ReplaceAll(regexPattern, "\\{x\\}", "(?P<x>\\d+)")
+	regexPattern = strings.ReplaceAll(regexPattern, "\\{y\\}", "(?P<y>\\d+)")
+	regexPattern = strings.ReplaceAll(regexPattern, "\\{z\\}", "(?P<z>\\d+)")
 	pathRegex, err := regexp.Compile("^" + regexPattern + "$")
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidPattern, err)
@@ -49,10 +49,10 @@ func NewReader(filePattern string) (*Reader, error) {
 func (r *Reader) ReadTile(tileID tile.ID) ([]byte, error) {
 	filePath := formatPattern(r.filePattern, tileID)
 	tileData, err := os.ReadFile(filePath)
-	if os.IsNotExist(err) {
-		return make([]byte, 0), nil
-	}
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return make([]byte, 0), nil
+		}
 		return nil, err
 	}
 	return tileData, nil

@@ -1,6 +1,6 @@
 # testdata
 
-Put your tile index files to `testdata/input.tar.gz`:
+Download test data:
 ```bash
-tar -czf testdata/input.tar.gz small.index medium.index large.index
+wget -O "input.zip" "https://github.com/eak1mov/libtiles-testdata/archive/index-v0.2.0.zip"
 ```

@@ -13,7 +13,7 @@ func Compress(data []byte, compression Compression) ([]byte, error) {
 	}
 
 	if compression != CompressionGzip {
-		return nil, fmt.Errorf("compression not supported (%v)", compression)
+		return nil, fmt.Errorf("compression not supported: %v", compression)
 	}
 
 	var buffer bytes.Buffer
@@ -36,7 +36,7 @@ func Decompress(data []byte, compression Compression) ([]byte, error) {
 	}
 
 	if compression != CompressionGzip {
-		return nil, fmt.Errorf("compression not supported (%v)", compression)
+		return nil, fmt.Errorf("compression not supported: %v", compression)
 	}
 
 	reader, err := gzip.NewReader(bytes.NewReader(data))

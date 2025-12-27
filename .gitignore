@@ -1,7 +1,7 @@
 *.tar.gz
+*.zip
 *.index
 *.tiles
 *.mbtiles
 *.pmtiles
-/pm_*
-/mb_*
+/tileutils

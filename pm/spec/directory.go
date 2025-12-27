@@ -20,7 +20,7 @@ func SerializeDirectory(entries []Entry) []byte {
 
 	buffer = binary.AppendUvarint(buffer, uint64(len(entries)))
 
-	var lastCode uint64 = 0
+	lastCode := uint64(0)
 	for _, entry := range entries {
 		buffer = binary.AppendUvarint(buffer, uint64(entry.TileCode)-lastCode)
 		lastCode = uint64(entry.TileCode)
@@ -34,7 +34,7 @@ func SerializeDirectory(entries []Entry) []byte {
 		buffer = binary.AppendUvarint(buffer, uint64(entry.Length))
 	}
 
-	var nextOffset uint64 = 0
+	nextOffset := uint64(0)
 	for i, entry := range entries {
 		if i > 0 && entry.Offset == nextOffset {
 			buffer = binary.AppendUvarint(buffer, 0)
@@ -63,7 +63,7 @@ func DeserializeDirectory(data []byte) ([]Entry, error) {
 	numEntries := readUvarint()
 	entries := make([]Entry, numEntries)
 
-	var lastCode uint64 = 0
+	lastCode := uint64(0)
 	for i := range numEntries {
 		value := readUvarint()
 		entries[i].TileCode = lastCode + value

@@ -110,23 +110,23 @@ func main() {
 ### Command Line Tools (examples)
 
 ```bash
-# Build tools
-go build ./tools/mb_export_index
-go build ./tools/pm_export_index
-go build ./tools/pm_import_index
-go build ./tools/mb_to_pm
-
-# Export tile index and tiles from MBTiles:
-mb_export_index -i input.mbtiles -o output.index -t output.tiles
-
-# Export tile index from PMTiles:
-pm_export_index -i input.pmtiles -o output.index
-
-# Import from tile index and tiles file to PMTiles:
-pm_import_index -i tiles.index -t tiles.dat -o output.pmtiles
+# Build
+go build ./cmd/tileutils
 
 # Convert MBTiles to PMTiles:
-mb_to_pm -i input.mbtiles -o output.pmtiles
+./tileutils convert -i input.mbtiles -o output.pmtiles
+
+# Convert MBTiles to individual tiles:
+./tileutils convert -i input.mbtiles -o /home/user/tiles/{z}/{x}/{y}.png
+
+# Export tile index and tiles from MBTiles:
+./tileutils export_index -i input.mbtiles -o output.index -t output.tiles
+
+# Export tile index from PMTiles:
+./tileutils export_index -i input.pmtiles -o output.index
+
+# Import from tile index and tiles file to PMTiles:
+./tileutils import_index -i input.index -t input.tiles -o output.pmtiles
 ```
 
 ## Project Structure
@@ -139,7 +139,7 @@ mb_to_pm -i input.mbtiles -o output.pmtiles
 ```
 libtiles/
 ├── tile/              # Common tile interfaces and types
-│   ├── tile.go        #   Tile ID, Reader, Writer interfaces
+│   ├── tile.go        #   Tile ID, Reader, Writer and other interfaces
 ├── mb/                # MBTiles API
 ├── pm/                # High-level PMTiles API
 │   ├── reader.go      #   Reader (access to tiles from pmtiles file)
@@ -150,13 +150,13 @@ libtiles/
 │   ├── tileid.go      #   Tile coordinate encoding
 ├── xyz/               # XYZ directory format API
 ├── index/             # Utilities for custom index formats
-└── tools/             # Command-line conversion tools
+└── cmd/tileutils/     # Command-line conversion tools
 ```
 
 ## Testing
 ```bash
-# Put your tile index files to `testdata/input.tar.gz`:
-tar -czf testdata/input.tar.gz small.index medium.index large.index
+# download test data:
+wget -O "testdata/input.zip" "https://github.com/eak1mov/libtiles-testdata/archive/index-v0.2.0.zip"
 
 # Run tests:
 go test ./...

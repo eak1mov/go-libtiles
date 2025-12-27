@@ -12,11 +12,23 @@ import (
 )
 
 func TestDirectorySerializer(t *testing.T) {
-	for testName, fileData := range internal.TestdataCases(t, "../../testdata/input.tar.gz") {
-		t.Run(testName, func(t *testing.T) {
+	for _, tc := range []string{
+		"empty.index",
+		"full5.index",
+		"full08.index",
+		"small.index",
+		"medium.index",
+		"large.index",
+	} {
+		t.Run(tc, func(t *testing.T) {
 			t.Parallel()
 
-			indexItems, err := index.ReadAll(fileData)
+			testData, err := internal.ReadTestdata("../../testdata/input.zip", tc)
+			if err != nil {
+				t.Fatalf("failed to read test data: %v", err)
+			}
+
+			indexItems, err := index.ReadAll(testData)
 			if err != nil {
 				t.Fatalf("index.ReadAll failed: %v", err)
 			}

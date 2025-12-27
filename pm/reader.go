@@ -9,8 +9,8 @@ import (
 
 // FileAccessFunc is a function to access file data (local or remote).
 // It must ensure that there are no partial reads.
-// TODO(eak1mov): specify zero-length reads
-type FileAccessFunc = func(offset, length uint64) ([]byte, error)
+// TODO(eak1mov): specify behavior for zero-length reads
+type FileAccessFunc func(offset, length uint64) ([]byte, error)
 
 // Reader implements tile.Reader and tile.LocationReader interfaces for PMTiles format.
 type Reader struct {
@@ -20,6 +20,8 @@ type Reader struct {
 }
 
 // NewFileReader opens a local PMTiles file and returns a Reader for it.
+//
+// The returned Reader must be closed after use to release file resources.
 func NewFileReader(filePath string) (*Reader, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -128,6 +130,13 @@ func (r *Reader) ReadLocation(tileID tile.ID) (tile.Location, error) {
 	}
 }
 
+// ReadTile reads a single tile from the PMTiles file.
+//
+// It returns the tile data or an error if the tile cannot be read.
+// If the tile does not exist, it returns an empty slice with no error.
+//
+// The caller is responsible for decompressing the data if needed (see
+// TileCompression from HeaderMetadata).
 func (r *Reader) ReadTile(tileID tile.ID) ([]byte, error) {
 	location, err := r.ReadLocation(tileID)
 	if err != nil {

@@ -1,4 +1,7 @@
 // Package mb provides API for reading tiles and metadata in MBTiles format.
+//
+// Note: User must properly initialize the sqlite3 library generic driver
+// (e.g. import _ "github.com/mattn/go-sqlite3") before using this package.
 package mb
 
 import (
@@ -16,10 +19,8 @@ type Reader struct {
 }
 
 // NewReader creates a new Reader for the given MBTiles file path.
-// It opens the file in read-only mode and prepares a statement for efficient ReadTile calls.
 //
-// Note: User must properly initialize the sqlite3 library generic driver
-// (e.g. import _ "github.com/mattn/go-sqlite3") before calling this function.
+// The returned Reader must be closed after use to release database resources.
 func NewReader(filePath string) (*Reader, error) {
 	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?mode=ro", filePath))
 	if err != nil {
@@ -95,7 +96,9 @@ func (r *Reader) VisitTiles(visitor func(tile.ID, []byte) error) error {
 
 		y = (1 << z) - 1 - y // TMS -> XYZ
 
-		visitor(tile.ID{X: x, Y: y, Z: z}, tileData)
+		if err := visitor(tile.ID{X: x, Y: y, Z: z}, tileData); err != nil {
+			return err
+		}
 	}
 
 	if err := rows.Err(); err != nil {
