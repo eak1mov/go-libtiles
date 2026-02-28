@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"path/filepath"
 
 	"github.com/eak1mov/go-libtiles/mb"
 	"github.com/eak1mov/go-libtiles/pm"
@@ -21,6 +22,7 @@ type convertCmd struct {
 	inputPath    string
 	outputFormat string
 	outputPath   string
+	deduplicate  bool
 }
 
 func (c *convertCmd) Name() string     { return "convert" }
@@ -33,9 +35,10 @@ func (c *convertCmd) SetFlags(f *flag.FlagSet) {
 	f.StringVar(&c.inputFormat, "if", "", "Input format (mbtiles, pmtiles, xyz)")
 	f.StringVar(&c.outputPath, "o", "", "Output path")
 	f.StringVar(&c.outputFormat, "of", "", "Output format (mbtiles, pmtiles, xyz)")
+	f.BoolVar(&c.deduplicate, "d", true, "Deduplicate tiles (for mbtiles format)")
 }
 
-func convertMetadata(metadata map[string]string) (pm.HeaderMetadata, error) {
+func metadataMbToPm(metadata map[string]string) (pm.HeaderMetadata, error) {
 	header := pm.HeaderMetadata{}
 
 	formatValue, formatFound := metadata["format"]
@@ -105,6 +108,25 @@ func convertMetadata(metadata map[string]string) (pm.HeaderMetadata, error) {
 	return header, nil
 }
 
+func metadataPmToMb(pmMetadata *pm.HeaderMetadata) (map[string]string, error) {
+	mbMetadata := make(map[string]string)
+
+	switch pmMetadata.TileType {
+	case spec.TileTypeMvt:
+		mbMetadata["format"] = "pbf"
+	case spec.TileTypePng:
+		mbMetadata["format"] = "png"
+	case spec.TileTypeJpeg:
+		mbMetadata["format"] = "jpg"
+	case spec.TileTypeWebp:
+		mbMetadata["format"] = "webp"
+	case spec.TileTypeAvif:
+		mbMetadata["format"] = "avif"
+	}
+
+	return mbMetadata, nil
+}
+
 func (c *convertCmd) Execute(_ context.Context, _ *flag.FlagSet, _ ...any) subcommands.ExitStatus {
 	inputFormat := deduceFormat(c.inputFormat, c.inputPath)
 	outputFormat := deduceFormat(c.outputFormat, c.outputPath)
@@ -130,29 +152,54 @@ func (c *convertCmd) Execute(_ context.Context, _ *flag.FlagSet, _ ...any) subco
 		defer closer.Close()
 	}
 
+	var mbMetadata map[string]string
 	var pmHeaderMetadata pm.HeaderMetadata
 	var pmJsonMetadata []byte
-	if inputFormat == "mbtiles" && outputFormat == "pmtiles" {
-		metadata, err := reader.(*mb.Reader).ReadMetadata()
+
+	switch inputFormat {
+	case "mbtiles":
+		mbMetadata, err = reader.(*mb.Reader).ReadMetadata()
 		if err != nil {
 			log.Println(err)
 			return subcommands.ExitFailure
 		}
-		pmHeaderMetadata, err = convertMetadata(metadata)
+	case "pmtiles":
+		pmHeaderMetadata = reader.(*pm.Reader).HeaderMetadata()
+		pmJsonMetadata, err = reader.(*pm.Reader).ReadMetadata()
+		if err != nil {
+			log.Println(err)
+			return subcommands.ExitFailure
+		}
+	}
+
+	switch {
+	case inputFormat == "mbtiles" && outputFormat == "pmtiles":
+		pmHeaderMetadata, err = metadataMbToPm(mbMetadata)
 		if err != nil {
 			log.Println("failed to convert metadata:", err)
 			return subcommands.ExitFailure
 		}
-		jsonValue, found := metadata["json"]
+		jsonValue, found := mbMetadata["json"]
 		if found {
 			pmJsonMetadata = []byte(jsonValue)
 		}
+	case inputFormat == "pmtiles" && outputFormat == "mbtiles":
+		mbMetadata, err = metadataPmToMb(&pmHeaderMetadata)
+		if err != nil {
+			log.Println("failed to convert metadata:", err)
+			return subcommands.ExitFailure
+		}
+		mbMetadata["name"] = filepath.Base(c.inputPath)
 	}
 
 	var writer tile.Writer
 	switch outputFormat {
 	case "mbtiles":
-		writer, err = mb.NewWriter(c.outputPath, mb.WithLogger(log.Default()))
+		writer, err = mb.NewWriter(
+			c.outputPath,
+			mb.WithMetadata(mbMetadata),
+			mb.WithDeduplication(c.deduplicate),
+		)
 	case "pmtiles":
 		writer, err = pm.NewWriter(
 			c.outputPath,

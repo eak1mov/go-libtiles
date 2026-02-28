@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/binary"
 	"flag"
 	"fmt"
 	"io"
@@ -64,7 +63,7 @@ func (c *exportCmd) exportTiles(reader tile.Visitor) error {
 			Offset: tilesOffset,
 		}
 
-		if err := binary.Write(indexWriter, binary.LittleEndian, indexItem); err != nil {
+		if err := index.WriteItem(indexWriter, indexItem); err != nil {
 			return err
 		}
 
@@ -97,24 +96,29 @@ func (c *exportCmd) exportTiles(reader tile.Visitor) error {
 }
 
 func (c *exportCmd) exportLocations(reader tile.LocationVisitor) error {
-	indexItems := make([]index.Item, 0)
-	for tileID, tileLocation := range tile.IterLocations(reader) {
-		indexItems = append(indexItems, index.Item{
+	indexFile, err := os.Create(c.outputIndexPath)
+	if err != nil {
+		return err
+	}
+	defer indexFile.Close()
+
+	indexWriter := bufio.NewWriter(indexFile)
+
+	err = reader.VisitLocations(func(tileID tile.ID, tileLocation tile.Location) error {
+		return index.WriteItem(indexWriter, index.Item{
 			X:      tileID.X,
 			Y:      tileID.Y,
 			Z:      tileID.Z,
 			Length: uint32(tileLocation.Length),
 			Offset: tileLocation.Offset,
 		})
-	}
+	})
 
-	file, err := os.Create(c.outputIndexPath)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
 
-	return index.WriteAll(indexItems, file)
+	return indexWriter.Flush()
 }
 
 func (c *exportCmd) Execute(_ context.Context, _ *flag.FlagSet, _ ...any) subcommands.ExitStatus {

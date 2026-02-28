@@ -28,7 +28,11 @@ func (i Item) TileLocation() tile.Location {
 	return tile.Location{Offset: i.Offset, Length: uint64(i.Length)}
 }
 
-func WriteAll(items []Item, writer io.Writer) error {
+func WriteItem(writer io.Writer, item Item) error {
+	return binary.Write(writer, binary.LittleEndian, item)
+}
+
+func WriteAll(writer io.Writer, items []Item) error {
 	return binary.Write(writer, binary.LittleEndian, items)
 }
 

@@ -11,6 +11,7 @@ import (
 	"slices"
 
 	"github.com/eak1mov/go-libtiles/index"
+	"github.com/eak1mov/go-libtiles/mb"
 	"github.com/eak1mov/go-libtiles/pm"
 	"github.com/eak1mov/go-libtiles/tile"
 	"github.com/google/subcommands"
@@ -33,7 +34,7 @@ func (c *importCmd) SetFlags(f *flag.FlagSet) {
 	f.StringVar(&c.inputIndexPath, "i", "", "Input index file path")
 	f.StringVar(&c.inputTilesPath, "t", "", "Input tiles file path")
 	f.StringVar(&c.outputPath, "o", "", "Output file path")
-	f.StringVar(&c.outputFormat, "of", "", "Output file format (pmtiles)")
+	f.StringVar(&c.outputFormat, "of", "", "Output file format (mbtiles, pmtiles)")
 }
 
 func (c *importCmd) Execute(_ context.Context, _ *flag.FlagSet, _ ...any) subcommands.ExitStatus {
@@ -58,6 +59,8 @@ func (c *importCmd) Execute(_ context.Context, _ *flag.FlagSet, _ ...any) subcom
 
 	var writer tile.Writer
 	switch deduceFormat(c.outputFormat, c.outputPath) {
+	case "mbtiles":
+		writer, err = mb.NewWriter(c.outputPath)
 	case "pmtiles":
 		writer, err = pm.NewWriter(c.outputPath, pm.WithLogger(log.Default()))
 	default:

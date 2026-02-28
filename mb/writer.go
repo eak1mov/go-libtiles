@@ -1,6 +1,7 @@
 package mb
 
 import (
+	"crypto/md5"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -11,27 +12,22 @@ import (
 	"github.com/eak1mov/go-libtiles/tile"
 )
 
-// Writer implements tile.Writer interface for MBTiles format.
-type Writer struct {
-	db     *sql.DB
-	stmt   *sql.Stmt
-	logger *log.Logger
+type Writer interface {
+	io.Closer
+	tile.Writer
 }
 
 type writerConfig struct {
 	Metadata      map[string]string
 	Logger        *log.Logger
 	Optimizations bool
+	Deduplication bool
 }
 
 type WriterOption func(*writerConfig)
 
 func WithMetadata(metadata map[string]string) WriterOption {
 	return func(c *writerConfig) { c.Metadata = metadata }
-}
-
-func WithLogger(logger *log.Logger) WriterOption {
-	return func(c *writerConfig) { c.Logger = logger }
 }
 
 // WithOptimizations enables or disables SQLite performance optimizations (enabled by default).
@@ -41,6 +37,10 @@ func WithOptimizations(enable bool) WriterOption {
 	return func(c *writerConfig) { c.Optimizations = enable }
 }
 
+func WithDeduplication(enable bool) WriterOption {
+	return func(c *writerConfig) { c.Deduplication = enable }
+}
+
 // NewWriter creates a new Writer for writing to a MBTiles file.
 // It always creates a new file and does not support appending to an existing one.
 //
@@ -48,10 +48,11 @@ func WithOptimizations(enable bool) WriterOption {
 // will be left in an invalid state.
 //
 // Close() should always be called to release database resources.
-func NewWriter(filePath string, opts ...WriterOption) (*Writer, error) {
+func NewWriter(filePath string, opts ...WriterOption) (writer Writer, err error) {
 	config := writerConfig{
 		Logger:        log.New(io.Discard, "", log.LstdFlags),
 		Optimizations: true,
+		Deduplication: true,
 	}
 	for _, opt := range opts {
 		opt(&config)
@@ -61,7 +62,6 @@ func NewWriter(filePath string, opts ...WriterOption) (*Writer, error) {
 		return nil, fmt.Errorf("libtiles: file already exists: %q", filePath)
 	}
 
-	var err error
 	db, err := sql.Open("sqlite3", filePath)
 	if err != nil {
 		return nil, err
@@ -84,12 +84,7 @@ func NewWriter(filePath string, opts ...WriterOption) (*Writer, error) {
 
 	_, err = db.Exec(`
 		CREATE TABLE metadata (name TEXT, value TEXT);
-		CREATE TABLE tiles (
-			zoom_level INTEGER,
-			tile_column INTEGER,
-			tile_row INTEGER,
-			tile_data BLOB
-		);
+		CREATE UNIQUE INDEX name ON metadata (name);
 	`)
 	if err != nil {
 		return nil, err
@@ -102,19 +97,49 @@ func NewWriter(filePath string, opts ...WriterOption) (*Writer, error) {
 		}
 	}
 
+	if config.Deduplication {
+		writer, err = newDedupWriter(db)
+	} else {
+		writer, err = newFlatWriter(db)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return writer, nil
+}
+
+type flatWriter struct {
+	db   *sql.DB
+	stmt *sql.Stmt
+}
+
+func newFlatWriter(db *sql.DB) (*flatWriter, error) {
+	_, err := db.Exec(`
+		CREATE TABLE tiles (
+			zoom_level INTEGER,
+			tile_column INTEGER,
+			tile_row INTEGER,
+			tile_data BLOB
+		);
+	`)
+	if err != nil {
+		return nil, err
+	}
+
 	stmt, err := db.Prepare("INSERT INTO tiles (zoom_level, tile_column, tile_row, tile_data) VALUES (?, ?, ?, ?)")
 	if err != nil {
 		return nil, err
 	}
 
-	return &Writer{db: db, stmt: stmt, logger: config.Logger}, nil
+	return &flatWriter{db: db, stmt: stmt}, nil
 }
 
-func (w *Writer) Close() error {
+func (w *flatWriter) Close() error {
 	return errors.Join(w.stmt.Close(), w.db.Close())
 }
 
-func (w *Writer) WriteTile(tileID tile.ID, tileData []byte) error {
+func (w *flatWriter) WriteTile(tileID tile.ID, tileData []byte) error {
 	x, y, z := tileID.X, tileID.Y, tileID.Z
 	y = (1 << z) - 1 - y // XYZ -> TMS
 
@@ -122,10 +147,83 @@ func (w *Writer) WriteTile(tileID tile.ID, tileData []byte) error {
 	return err
 }
 
-func (w *Writer) Finalize() error {
-	w.logger.Println("libtiles: creating index")
+func (w *flatWriter) Finalize() error {
 	_, err := w.db.Exec("CREATE UNIQUE INDEX tile_index ON tiles (zoom_level, tile_column, tile_row)")
-
-	w.logger.Println("libtiles: done!")
 	return err
+}
+
+type dedupWriter struct {
+	db        *sql.DB
+	dataStmt  *sql.Stmt
+	indexStmt *sql.Stmt
+	dataIDs   map[[16]byte]uint32 // hash -> id
+}
+
+func newDedupWriter(db *sql.DB) (*dedupWriter, error) {
+	var err error
+
+	_, err = db.Exec(`
+		CREATE TABLE map (
+			zoom_level INTEGER,
+			tile_column INTEGER,
+			tile_row INTEGER,
+			tile_id INTEGER,
+			PRIMARY KEY (zoom_level, tile_column, tile_row)
+		) WITHOUT ROWID;
+		CREATE TABLE images (tile_id INTEGER PRIMARY KEY, tile_data BLOB);
+		CREATE VIEW tiles AS SELECT zoom_level, tile_column, tile_row, tile_data FROM map JOIN images USING (tile_id);
+	`)
+	if err != nil {
+		return nil, err
+	}
+
+	dataStmt, err := db.Prepare("INSERT INTO images (tile_id, tile_data) VALUES (?, ?)")
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			dataStmt.Close()
+		}
+	}()
+
+	indexStmt, err := db.Prepare("INSERT INTO map (zoom_level, tile_column, tile_row, tile_id) VALUES (?, ?, ?, ?)")
+	if err != nil {
+		return nil, err
+	}
+
+	return &dedupWriter{
+		db:        db,
+		dataStmt:  dataStmt,
+		indexStmt: indexStmt,
+		dataIDs:   make(map[[16]byte]uint32),
+	}, nil
+}
+
+func (w *dedupWriter) Close() error {
+	return errors.Join(w.indexStmt.Close(), w.dataStmt.Close(), w.db.Close())
+}
+
+func (w *dedupWriter) WriteTile(tileID tile.ID, tileData []byte) error {
+	x, y, z := tileID.X, tileID.Y, tileID.Z
+	y = (1 << z) - 1 - y // XYZ -> TMS
+
+	digest := md5.Sum(tileData)
+	tileDataID, exists := w.dataIDs[digest]
+
+	if !exists {
+		tileDataID = uint32(len(w.dataIDs))
+		w.dataIDs[digest] = tileDataID
+
+		if _, err := w.dataStmt.Exec(tileDataID, tileData); err != nil {
+			return err
+		}
+	}
+
+	_, err := w.indexStmt.Exec(z, x, y, tileDataID)
+	return err
+}
+
+func (w *dedupWriter) Finalize() error {
+	return nil
 }
