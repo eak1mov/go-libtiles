@@ -1,42 +1,31 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"path/filepath"
 
+	"github.com/eak1mov/go-libtiles/cmd/internal"
 	"github.com/eak1mov/go-libtiles/mb"
 	"github.com/eak1mov/go-libtiles/pm"
 	"github.com/eak1mov/go-libtiles/pm/spec"
 	"github.com/eak1mov/go-libtiles/tile"
+	"github.com/eak1mov/go-libtiles/wt"
 	"github.com/eak1mov/go-libtiles/xyz"
-	"github.com/google/subcommands"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/schollz/progressbar/v3"
 )
 
-type convertCmd struct {
-	inputFormat  string
-	inputPath    string
-	outputFormat string
-	outputPath   string
-	deduplicate  bool
-}
-
-func (c *convertCmd) Name() string     { return "convert" }
-func (c *convertCmd) Synopsis() string { return "convert between tile storage formats" }
-func (c *convertCmd) Usage() string {
-	return "tileutils convert -i <path> -o <path> [-if <format> | -of <format>]\n"
-}
-func (c *convertCmd) SetFlags(f *flag.FlagSet) {
-	f.StringVar(&c.inputPath, "i", "", "Input path")
-	f.StringVar(&c.inputFormat, "if", "", "Input format (mbtiles, pmtiles, xyz)")
-	f.StringVar(&c.outputPath, "o", "", "Output path")
-	f.StringVar(&c.outputFormat, "of", "", "Output format (mbtiles, pmtiles, xyz)")
-	f.BoolVar(&c.deduplicate, "d", true, "Deduplicate tiles (for mbtiles format)")
-}
+var (
+	inputPath    = flag.String("i", "", "Input path")
+	inputFormat  = flag.String("if", "", "Input format (mbtiles, pmtiles, wtiles, xyz)")
+	outputPath   = flag.String("o", "", "Output path")
+	outputFormat = flag.String("of", "", "Output format (mbtiles, pmtiles, wtiles, xyz)")
+	deduplicate  = flag.Bool("d", true, "Deduplicate tiles (for mbtiles format)")
+)
 
 func metadataMbToPm(metadata map[string]string) (pm.HeaderMetadata, error) {
 	header := pm.HeaderMetadata{}
@@ -127,26 +116,26 @@ func metadataPmToMb(pmMetadata *pm.HeaderMetadata) (map[string]string, error) {
 	return mbMetadata, nil
 }
 
-func (c *convertCmd) Execute(_ context.Context, _ *flag.FlagSet, _ ...any) subcommands.ExitStatus {
-	inputFormat := deduceFormat(c.inputFormat, c.inputPath)
-	outputFormat := deduceFormat(c.outputFormat, c.outputPath)
+func run() error {
+	inputFormat := internal.DeduceFormat(*inputFormat, *inputPath)
+	outputFormat := internal.DeduceFormat(*outputFormat, *outputPath)
 
 	var err error
 	var reader tile.Visitor
 	switch inputFormat {
 	case "mbtiles":
-		reader, err = mb.NewReader(c.inputPath)
+		reader, err = mb.NewReader(*inputPath)
 	case "pmtiles":
-		reader, err = pm.NewFileReader(c.inputPath)
+		reader, err = pm.NewFileReader(*inputPath)
+	case "wtiles":
+		reader, err = wt.NewFileReader(*inputPath)
 	case "xyz", "":
-		reader, err = xyz.NewReader(c.inputPath)
+		reader, err = xyz.NewReader(*inputPath)
 	default:
-		log.Printf("invalid input format: %q", c.inputFormat)
-		return subcommands.ExitFailure
+		return fmt.Errorf("invalid input format: %q", inputFormat)
 	}
 	if err != nil {
-		log.Println(err)
-		return subcommands.ExitFailure
+		return err
 	}
 	if closer, ok := reader.(io.Closer); ok {
 		defer closer.Close()
@@ -160,15 +149,13 @@ func (c *convertCmd) Execute(_ context.Context, _ *flag.FlagSet, _ ...any) subco
 	case "mbtiles":
 		mbMetadata, err = reader.(*mb.Reader).ReadMetadata()
 		if err != nil {
-			log.Println(err)
-			return subcommands.ExitFailure
+			return err
 		}
 	case "pmtiles":
 		pmHeaderMetadata = reader.(*pm.Reader).HeaderMetadata()
 		pmJsonMetadata, err = reader.(*pm.Reader).ReadMetadata()
 		if err != nil {
-			log.Println(err)
-			return subcommands.ExitFailure
+			return err
 		}
 	}
 
@@ -176,8 +163,7 @@ func (c *convertCmd) Execute(_ context.Context, _ *flag.FlagSet, _ ...any) subco
 	case inputFormat == "mbtiles" && outputFormat == "pmtiles":
 		pmHeaderMetadata, err = metadataMbToPm(mbMetadata)
 		if err != nil {
-			log.Println("failed to convert metadata:", err)
-			return subcommands.ExitFailure
+			return fmt.Errorf("failed to convert metadata: %s", err)
 		}
 		jsonValue, found := mbMetadata["json"]
 		if found {
@@ -186,36 +172,38 @@ func (c *convertCmd) Execute(_ context.Context, _ *flag.FlagSet, _ ...any) subco
 	case inputFormat == "pmtiles" && outputFormat == "mbtiles":
 		mbMetadata, err = metadataPmToMb(&pmHeaderMetadata)
 		if err != nil {
-			log.Println("failed to convert metadata:", err)
-			return subcommands.ExitFailure
+			return fmt.Errorf("failed to convert metadata: %s", err)
 		}
-		mbMetadata["name"] = filepath.Base(c.inputPath)
+		mbMetadata["name"] = filepath.Base(*inputPath)
 	}
 
 	var writer tile.Writer
 	switch outputFormat {
 	case "mbtiles":
 		writer, err = mb.NewWriter(
-			c.outputPath,
+			*outputPath,
 			mb.WithMetadata(mbMetadata),
-			mb.WithDeduplication(c.deduplicate),
+			mb.WithDeduplication(*deduplicate),
 		)
 	case "pmtiles":
 		writer, err = pm.NewWriter(
-			c.outputPath,
+			*outputPath,
 			pm.WithMetadata(pmJsonMetadata),
 			pm.WithHeaderMetadata(pmHeaderMetadata),
 			pm.WithLogger(log.Default()),
 		)
+	case "wtiles":
+		writer, err = wt.NewWriter(
+			*outputPath,
+			wt.WithLogger(log.Default()),
+		)
 	case "xyz", "":
-		writer, err = xyz.NewWriter(c.outputPath)
+		writer, err = xyz.NewWriter(*outputPath)
 	default:
-		log.Printf("invalid output format: %q", c.outputFormat)
-		return subcommands.ExitFailure
+		return fmt.Errorf("invalid output format: %q", outputFormat)
 	}
 	if err != nil {
-		log.Println(err)
-		return subcommands.ExitFailure
+		return err
 	}
 	if closer, ok := writer.(io.Closer); ok {
 		defer closer.Close()
@@ -231,14 +219,25 @@ func (c *convertCmd) Execute(_ context.Context, _ *flag.FlagSet, _ ...any) subco
 	fmt.Println()
 
 	if err != nil {
-		log.Println(err)
-		return subcommands.ExitFailure
+		return err
 	}
 
 	if err := writer.Finalize(); err != nil {
-		log.Println(err)
-		return subcommands.ExitFailure
+		return err
 	}
 
-	return subcommands.ExitSuccess
+	return nil
+}
+
+func main() {
+	flag.Usage = func() {
+		fmt.Printf("Usage: %s -i <path> -o <path> [-if <format> | -of <format>]\n", os.Args[0])
+		flag.PrintDefaults()
+	}
+	flag.Parse()
+
+	if err := run(); err != nil {
+		log.Println(err)
+		os.Exit(1)
+	}
 }

@@ -2,49 +2,38 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"os"
 
+	"github.com/eak1mov/go-libtiles/cmd/internal"
 	"github.com/eak1mov/go-libtiles/index"
 	"github.com/eak1mov/go-libtiles/mb"
 	"github.com/eak1mov/go-libtiles/pm"
 	"github.com/eak1mov/go-libtiles/tile"
-	"github.com/google/subcommands"
+	"github.com/eak1mov/go-libtiles/wt"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/schollz/progressbar/v3"
 )
 
-type exportCmd struct {
-	inputFormat     string
-	inputPath       string
-	outputIndexPath string
-	outputTilesPath string
-}
+var (
+	inputPath       = flag.String("i", "", "Input file path")
+	inputFormat     = flag.String("if", "", "Input file format (mbtiles, pmtiles, wtiles)")
+	outputIndexPath = flag.String("o", "", "Output index file path")
+	outputTilesPath = flag.String("t", "", "Output tiles file path")
+)
 
-func (c *exportCmd) Name() string     { return "export_index" }
-func (c *exportCmd) Synopsis() string { return "export tile index and data from tileset" }
-func (c *exportCmd) Usage() string {
-	return "tileutils export_index -i <path> -o <path> [-t <path> -if <format>]\n"
-}
-func (c *exportCmd) SetFlags(f *flag.FlagSet) {
-	f.StringVar(&c.inputPath, "i", "", "Input file path")
-	f.StringVar(&c.inputFormat, "if", "", "Input file format (mbtiles, pmtiles)")
-	f.StringVar(&c.outputIndexPath, "o", "", "Output index file path")
-	f.StringVar(&c.outputTilesPath, "t", "", "Output tiles file path")
-}
-
-func (c *exportCmd) exportTiles(reader tile.Visitor) error {
-	indexFile, err := os.Create(c.outputIndexPath)
+func exportTiles(reader tile.Visitor) error {
+	indexFile, err := os.Create(*outputIndexPath)
 	if err != nil {
 		return err
 	}
 	defer indexFile.Close()
 	indexWriter := bufio.NewWriter(indexFile)
 
-	tilesFile, err := os.Create(c.outputTilesPath)
+	tilesFile, err := os.Create(*outputTilesPath)
 	if err != nil {
 		return err
 	}
@@ -95,8 +84,8 @@ func (c *exportCmd) exportTiles(reader tile.Visitor) error {
 	return nil
 }
 
-func (c *exportCmd) exportLocations(reader tile.LocationVisitor) error {
-	indexFile, err := os.Create(c.outputIndexPath)
+func exportLocations(reader tile.LocationVisitor) error {
+	indexFile, err := os.Create(*outputIndexPath)
 	if err != nil {
 		return err
 	}
@@ -121,37 +110,43 @@ func (c *exportCmd) exportLocations(reader tile.LocationVisitor) error {
 	return indexWriter.Flush()
 }
 
-func (c *exportCmd) Execute(_ context.Context, _ *flag.FlagSet, _ ...any) subcommands.ExitStatus {
+func run() error {
 	var err error
 	var reader tile.Visitor
 
-	switch deduceFormat(c.inputFormat, c.inputPath) {
+	switch internal.DeduceFormat(*inputFormat, *inputPath) {
 	case "mbtiles":
-		reader, err = mb.NewReader(c.inputPath)
+		reader, err = mb.NewReader(*inputPath)
 	case "pmtiles":
-		reader, err = pm.NewFileReader(c.inputPath)
+		reader, err = pm.NewFileReader(*inputPath)
+	case "wtiles":
+		reader, err = wt.NewFileReader(*inputPath)
 	default:
-		log.Printf("invalid input format: %q", c.inputFormat)
-		return subcommands.ExitFailure
+		return fmt.Errorf("invalid input format: %q", *inputFormat)
 	}
 	if err != nil {
-		log.Println(err)
-		return subcommands.ExitFailure
+		return err
 	}
 	if closer, ok := reader.(io.Closer); ok {
 		defer closer.Close()
 	}
 
 	if visitor, ok := reader.(tile.LocationVisitor); ok {
-		err = c.exportLocations(visitor)
+		return exportLocations(visitor)
 	} else {
-		err = c.exportTiles(reader)
+		return exportTiles(reader)
 	}
+}
 
-	if err != nil {
+func main() {
+	flag.Usage = func() {
+		fmt.Printf("Usage: %s -i <path> -o <path> [-t <path> -if <format>]\n", os.Args[0])
+		flag.PrintDefaults()
+	}
+	flag.Parse()
+
+	if err := run(); err != nil {
 		log.Println(err)
-		return subcommands.ExitFailure
+		os.Exit(1)
 	}
-
-	return subcommands.ExitSuccess
 }

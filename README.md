@@ -8,10 +8,11 @@ It is designed to be easy to use, efficient and to integrate smoothly into Go ap
 
 ## Features
 
-- **PMTiles Support**: Complete implementation of [PMTiles v3](https://github.com/protomaps/PMTiles/blob/main/spec/v3/spec.md) specification.
-- **MBTiles Support**: Read tiles and metadata from [MBTiles 1.3](https://github.com/mapbox/mbtiles-spec/blob/master/1.3/spec.md) format.
-- **XYZ Directory Support**: Read and write tiles in standard [XYZ directory structure](https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames) (`/zoom/x/y.png`).
-- **Format Conversion**: Convert between MBTiles, PMTiles and custom index formats.
+- **[MBTiles 1.3](https://github.com/mapbox/mbtiles-spec/blob/master/1.3/spec.md) Format Support.**
+- **[PMTiles v3](https://github.com/protomaps/PMTiles/blob/main/spec/v3/spec.md) Format Support.**
+- **[WebTiles 0.2](https://github.com/eak1mov/webtiles) Format Support**.
+- **[XYZ Directory](https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames) Support**: Read and write tiles to files with paths like `/zoom/x/y.png`.
+- **Format Conversion**: Convert between MBTiles, PMTiles, WebTiles and custom index formats.
 - **Modular Design**: Clean separation between low-level format handling and high-level APIs.
 - **High Performance**: Optimized for large tile datasets.
 
@@ -24,15 +25,22 @@ go get github.com/eak1mov/go-libtiles
 
 ## Quick Start
 
-### Writing PMTiles
+### Writing Tiles
 ```go
 import (
-    "github.com/eak1mov/go-libtiles/pm"
+    "github.com/eak1mov/go-libtiles/mb"
+    // "github.com/eak1mov/go-libtiles/pm"
+    // "github.com/eak1mov/go-libtiles/wt"
+    // "github.com/eak1mov/go-libtiles/xyz"
     "github.com/eak1mov/go-libtiles/tile"
+    _ "github.com/mattn/go-sqlite3" // import sqlite3 driver for mbtiles format
 )
 
 func main() {
-    writer, err := pm.NewWriter("output.pmtiles")
+    writer, err := mb.NewWriter("output.mbtiles")
+    // writer, err := pm.NewWriter("output.pmtiles")
+    // writer, err := wt.NewWriter("output.wtiles")
+    // writer, err := xyz.NewWriter("output/{z}/{x}/{y}.png")
     if err != nil {
         // handle error
     }
@@ -50,44 +58,22 @@ func main() {
 }
 ```
 
-### Reading PMTiles
-```go
-import (
-    "github.com/eak1mov/go-libtiles/pm"
-    "github.com/eak1mov/go-libtiles/tile"
-)
-
-func main() {
-    reader, err := pm.NewFileReader("input.pmtiles")
-    if err != nil {
-        // handle error
-    }
-    defer reader.Close()
-
-    tileID := tile.ID{X: 1, Y: 2, Z: 3}
-    tileData, err := reader.ReadTile(tileID)
-    if err != nil {
-        // handle error
-    }
-    fmt.Printf("Read tile %v, size: %d bytes\n", tileID, len(tileData))
-
-    // Iterate over all tiles
-    for tileID, tileData := range tile.IterTiles(reader) {
-        fmt.Printf("Tile %v: %d bytes\n", tileID, len(tileData))
-    }
-}
-```
-
-### Reading MBTiles
+### Reading Tiles
 ```go
 import (
     "github.com/eak1mov/go-libtiles/mb"
+    // "github.com/eak1mov/go-libtiles/pm"
+    // "github.com/eak1mov/go-libtiles/wt"
+    // "github.com/eak1mov/go-libtiles/xyz"
     "github.com/eak1mov/go-libtiles/tile"
-    _ "github.com/mattn/go-sqlite3" // Note: import sqlite3 driver
+    _ "github.com/mattn/go-sqlite3" // import sqlite3 driver for mbtiles format
 )
 
 func main() {
     reader, err := mb.NewReader("input.mbtiles")
+    // reader, err := pm.NewFileReader("input.pmtiles")
+    // reader, err := wt.NewFileReader("input.wtiles")
+    // reader, err := xyz.NewReader("input/{z}/{x}/{y}.png")
     if err != nil {
         // handle error
     }
@@ -111,46 +97,47 @@ func main() {
 
 ```bash
 # Build
-go build ./cmd/tileutils
+go build ./cmd/convert ./cmd/export ./cmd/import
 
 # Convert MBTiles to PMTiles:
-./tileutils convert -i input.mbtiles -o output.pmtiles
+./convert -i input.mbtiles -o output.pmtiles
+
+# Convert MBTiles to WebTiles:
+./convert -i input.mbtiles -o output.wtiles
 
 # Convert MBTiles to individual tiles:
-./tileutils convert -i input.mbtiles -o /home/user/tiles/{z}/{x}/{y}.png
+./convert -i input.mbtiles -o /home/user/tiles/{z}/{x}/{y}.png
 
 # Export tile index and tiles from MBTiles:
-./tileutils export_index -i input.mbtiles -o output.index -t output.tiles
+./export -i input.mbtiles -o output.index -t output.tiles
 
 # Export tile index from PMTiles:
-./tileutils export_index -i input.pmtiles -o output.index
+./export -i input.pmtiles -o output.index
 
 # Import from tile index and tiles file to PMTiles:
-./tileutils import_index -i input.index -t input.tiles -o output.pmtiles
+./import -i input.index -t input.tiles -o output.pmtiles
 ```
 
 ## Project Structure
 
-- `mb`: API for reading MBTiles format.
-- `pm`: high-level API for reading and writing tiles, metadata and headers in PMTiles format.
-- `pm/spec`: low-level implementation of the PMTiles v3 specification, including serialization/deserialization of headers and directories.
-- `xyz`: API for reading and writing standard directory-based tile structures (individual files with paths like `/z/x/y.ext`).
-
 ```
-libtiles/
+go-libtiles/
+├── cmd/               # Command-line conversion tools
 ├── tile/              # Common tile interfaces and types
 │   ├── tile.go        #   Tile ID, Reader, Writer and other interfaces
-├── mb/                # MBTiles API
-├── pm/                # High-level PMTiles API
-│   ├── reader.go      #   Reader (access to tiles from pmtiles file)
-│   ├── writer.go      #   Writer (write tiles to pmtiles file)
+├── mb/                # MBTiles API (Reader and Writer)
+├── pm/                # PMTiles API (Reader and Writer)
 ├── pm/spec/           # Low-level implementation of PMTiles specification
 │   ├── header.go      #   Header serialization and deserialization
 │   ├── directory.go   #   Tile directory management
 │   ├── tileid.go      #   Tile coordinate encoding
+├── wt/                # WebTiles API (Reader and Writer)
+├── wt/index/          # Low-level implementation of WebTiles index formats
+│   ├── basic/         #   Basic index format
+│   ├── plain/         #   Plain index format
+│   ├── sparse/        #   Sparse index format
 ├── xyz/               # XYZ directory format API
 ├── index/             # Utilities for custom index formats
-└── cmd/tileutils/     # Command-line conversion tools
 ```
 
 ## Testing
@@ -164,7 +151,3 @@ go test ./...
 
 ## License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-- `mb` package is based on the [MBTiles specification](https://github.com/mapbox/mbtiles-spec/blob/master/1.3/spec.md) by [Mapbox](https://github.com/mapbox/mbtiles-spec).
-- `pm/spec` package is based on the [PMTiles specification](https://github.com/protomaps/PMTiles/blob/main/spec/v3/spec.md) by [Protomaps](https://github.com/protomaps/PMTiles).

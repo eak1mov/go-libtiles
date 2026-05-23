@@ -49,3 +49,8 @@ type LocationReader interface {
 type LocationVisitor interface {
 	VisitLocations(visitor func(ID, Location) error) error
 }
+
+// Error is an error type used by this library.
+type Error string
+
+func (e Error) Error() string { return string(e) }

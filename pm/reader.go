@@ -8,45 +8,45 @@ import (
 )
 
 // FileAccessFunc is a function to access file data (local or remote).
-// It must ensure that there are no partial reads.
-// TODO(eak1mov): specify behavior for zero-length reads
+// It must ensure that there are no partial reads, and handle zero-length requests correctly.
 type FileAccessFunc func(offset, length uint64) ([]byte, error)
 
 // Reader implements tile.Reader and tile.LocationReader interfaces for PMTiles format.
 type Reader struct {
 	fileAccess FileAccessFunc
-	fileCloser func() error
 	header     *spec.Header
+}
+
+type FileReader struct {
+	Reader
+	file *os.File
 }
 
 // NewFileReader opens a local PMTiles file and returns a Reader for it.
 //
 // The returned Reader must be closed after use to release file resources.
-func NewFileReader(filePath string) (*Reader, error) {
+func NewFileReader(filePath string) (*FileReader, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
-	fileAccess := func(offset uint64, length uint64) ([]byte, error) {
+	fileAccess := func(offset, length uint64) ([]byte, error) {
 		buffer := make([]byte, length)
 		if _, err := file.ReadAt(buffer, int64(offset)); err != nil {
 			return nil, err
 		}
 		return buffer, nil
 	}
-	headerData, err := fileAccess(0, spec.HeaderLength)
+	reader, err := NewReader(fileAccess)
 	if err != nil {
+		file.Close()
 		return nil, err
 	}
-	header, err := spec.DeserializeHeader(headerData)
-	if err != nil {
-		return nil, err
-	}
-	return &Reader{
-		fileAccess: fileAccess,
-		fileCloser: func() error { return file.Close() },
-		header:     header,
-	}, nil
+	return &FileReader{*reader, file}, nil
+}
+
+func (r *FileReader) Close() error {
+	return r.file.Close()
 }
 
 // NewReader creates a Reader using a custom file access function.
@@ -60,20 +60,12 @@ func NewReader(fileAccess FileAccessFunc) (*Reader, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Reader{
-		fileAccess: fileAccess,
-		fileCloser: func() error { return nil },
-		header:     header,
-	}, nil
+	return &Reader{fileAccess: fileAccess, header: header}, nil
 }
 
 // TODO(eak1mov): add directory cache (offset -> []Entry) and reader with cache
 // func NewCachingFileReader(filePath string) (Reader, error)
 // func NewCachingReader(fileAccess FileAccessFunc) (Reader, error)
-
-func (r *Reader) Close() error {
-	return r.fileCloser()
-}
 
 // HeaderMetadata returns the metadata from the PMTiles header.
 func (r *Reader) HeaderMetadata() HeaderMetadata {

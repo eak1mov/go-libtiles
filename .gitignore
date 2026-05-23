@@ -4,4 +4,7 @@
 *.tiles
 *.mbtiles
 *.pmtiles
-/tileutils
+*.wtiles
+/convert
+/export
+/import
