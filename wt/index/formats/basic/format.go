@@ -66,21 +66,21 @@ func Write(header *fbs.IndexHeader, indexMap index.Map) ([]byte, error) {
 func Read(header *fbs.IndexHeader, indexData []byte) (index.Map, error) {
 	maxZoom := uint32(header.MaxZoom())
 
-	result := make(index.Map, len(indexData)/packed.LocationLength)
+	locationOffset := 0
+	locationLength := packed.LocationLength
+
+	result := make(index.Map, len(indexData)/locationLength)
 
 	for z := range maxZoom + 1 {
-		for x := range uint32(1 << z) {
-			for y := range uint32(1 << z) {
-				tileID := tile.ID{X: x, Y: y, Z: z}
+		for tileCode := range uint32(1 << (2 * z)) {
+			locationData := indexData[locationOffset:][:locationLength]
+			locationOffset += locationLength
 
-				location := QueryLocation(tileID)
-				locationData := indexData[location.Offset:][:location.Length]
+			tileID := morton.Decode(tileCode, z)
+			tileLocation := packed.Read(locationData)
 
-				tileLocation := packed.Read(locationData)
-
-				if tileLocation.Length() != 0 {
-					result[tileID] = tileLocation
-				}
+			if tileLocation.Length() != 0 {
+				result[tileID] = tileLocation
 			}
 		}
 	}
