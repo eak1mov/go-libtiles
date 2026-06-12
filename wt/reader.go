@@ -1,3 +1,4 @@
+// Package wt provides API for reading and writing tiles in WebTiles format.
 package wt
 
 import (

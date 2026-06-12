@@ -1,12 +1,13 @@
+// Package plain provides low-level implementation of WebTiles Plain index format.
 package plain
 
 import (
 	"github.com/eak1mov/go-libtiles/tile"
 	"github.com/eak1mov/go-libtiles/wt/fbs"
 	"github.com/eak1mov/go-libtiles/wt/index"
+	"github.com/eak1mov/go-libtiles/wt/index/block"
 	"github.com/eak1mov/go-libtiles/wt/index/internal/morton"
 	"github.com/eak1mov/go-libtiles/wt/index/packed"
-	"github.com/eak1mov/go-libtiles/wt/index/zoom"
 )
 
 const MaxZoom = 15
@@ -21,11 +22,8 @@ type BlockLocation struct {
 	Inner tile.Location
 }
 
-func QueryBlock(tileID tile.ID, blockLevels zoom.Levels) BlockLocation {
-	blockIdx := zoom.LevelIndex(blockLevels, tileID.Z)
-	blockZ := blockLevels[blockIdx]
-	innerZ := tileID.Z - blockZ
-	innerZCount := blockLevels[blockIdx+1] - blockLevels[blockIdx]
+func QueryBlock(tileID tile.ID, blockRange block.ZoomRange) BlockLocation {
+	innerZ := tileID.Z - blockRange.Start
 
 	blockTileID := tile.ID{
 		X: tileID.X >> innerZ,
@@ -39,8 +37,8 @@ func QueryBlock(tileID tile.ID, blockLevels zoom.Levels) BlockLocation {
 	}
 
 	blockCode := uint64(morton.Encode(blockTileID))
-	blockLength := calcBlockLength(innerZCount)
-	blockOffset := calcBlockLength(blockZ) + blockCode*blockLength
+	blockLength := calcBlockLength(blockRange.Count)
+	blockOffset := calcBlockLength(blockRange.Start) + blockCode*blockLength
 
 	innerCode := uint64(morton.Encode(innerTileID))
 	innerLength := uint64(1)
@@ -63,8 +61,9 @@ func Query(header *fbs.IndexHeader, tileID tile.ID, indexAccess index.FileAccess
 		return tile.Location{}, nil
 	}
 
-	blockLevels := zoom.LevelsFromMask(header.BlockLevelsMask())
-	location := QueryBlock(tileID, blockLevels)
+	blockLevels := block.LevelsMask(header.BlockLevelsMask())
+	blockRange := blockLevels.FindRange(tileID.Z)
+	location := QueryBlock(tileID, blockRange)
 
 	blockData, err := indexAccess(location.Block.Offset, location.Block.Length)
 	if err != nil {
@@ -83,22 +82,22 @@ func Write(header *fbs.IndexHeader, indexMap index.Map) ([]byte, error) {
 		maxZoom = max(maxZoom, tileID.Z)
 	}
 
-	var blockLevels zoom.Levels
+	var blockLevels block.LevelsMask
 	if maxZoom <= 8 {
-		blockLevels = []uint32{0, maxZoom + 1}
+		blockLevels = block.NewLevelsMask(0, maxZoom+1)
 	} else {
-		blockLevels = []uint32{0, maxZoom / 2, maxZoom + 1}
+		blockLevels = block.NewLevelsMask(0, maxZoom/2, maxZoom+1)
 	}
 
 	header.MutateMagic(fbs.IndexMagicValue)
 	header.MutateFormat(fbs.IndexFormatPlain)
 	header.MutateMaxZoom(uint64(maxZoom))
-	header.MutateBlockLevelsMask(zoom.LevelsToMask(blockLevels))
+	header.MutateBlockLevelsMask(uint64(blockLevels))
 
 	result := make([]byte, packed.LocationLength*calcBlockLength(maxZoom+1))
 
 	for tileID, tileLocation := range indexMap {
-		location := QueryBlock(tileID, blockLevels)
+		location := QueryBlock(tileID, blockLevels.FindRange(tileID.Z))
 		locationOffset := location.Block.Offset + location.Inner.Offset
 		locationLength := location.Inner.Length
 		locationData := result[locationOffset:][:locationLength]
@@ -111,7 +110,7 @@ func Write(header *fbs.IndexHeader, indexMap index.Map) ([]byte, error) {
 
 func Read(header *fbs.IndexHeader, indexData []byte) (index.Map, error) {
 	maxZoom := uint32(header.MaxZoom())
-	blockLevels := zoom.LevelsFromMask(header.BlockLevelsMask())
+	blockLevels := block.LevelsMask(header.BlockLevelsMask())
 
 	result := make(index.Map, len(indexData)/packed.LocationLength)
 
@@ -120,7 +119,7 @@ func Read(header *fbs.IndexHeader, indexData []byte) (index.Map, error) {
 			for y := range uint32(1 << z) {
 				tileID := tile.ID{X: x, Y: y, Z: z}
 
-				location := QueryBlock(tileID, blockLevels)
+				location := QueryBlock(tileID, blockLevels.FindRange(tileID.Z))
 				locationOffset := location.Block.Offset + location.Inner.Offset
 				locationLength := location.Inner.Length
 				locationData := indexData[locationOffset:][:locationLength]

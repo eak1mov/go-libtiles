@@ -1,3 +1,4 @@
+// Package sparse provides low-level implementation of WebTiles Sparse index format.
 package sparse
 
 import (
@@ -7,19 +8,18 @@ import (
 	"github.com/eak1mov/go-libtiles/tile"
 	"github.com/eak1mov/go-libtiles/wt/fbs"
 	"github.com/eak1mov/go-libtiles/wt/index"
+	"github.com/eak1mov/go-libtiles/wt/index/block"
 	"github.com/eak1mov/go-libtiles/wt/index/internal/morton"
 	"github.com/eak1mov/go-libtiles/wt/index/packed"
-	"github.com/eak1mov/go-libtiles/wt/index/zoom"
 )
 
 const MaxZoom = 24
 
-func QueryBlock(tileID tile.ID, blockLevels zoom.Levels, blockIdx int, blockData []byte) (tile.Location, error) {
-	blockZ := blockLevels[blockIdx]
-	nextZ := min(blockLevels[blockIdx+1], tileID.Z)
+func QueryBlock(tileID tile.ID, blockRange block.ZoomRange, blockData []byte) (tile.Location, error) {
+	nextZ := min(blockRange.End(), tileID.Z)
 
 	nextTileID := parentN(tileID, tileID.Z-nextZ)
-	blockTileID := parentN(tileID, tileID.Z-blockZ)
+	blockTileID := parentN(tileID, tileID.Z-blockRange.Start)
 	innerTileID := subtractTileIDs(nextTileID, blockTileID)
 
 	blockFbs := fbs.GetRootAsSparseBlock(blockData, 0)
@@ -48,11 +48,13 @@ func Query(header *fbs.IndexHeader, tileID tile.ID, indexAccess index.FileAccess
 		return tile.Location{}, nil
 	}
 
-	blockLevels := zoom.LevelsFromMask(header.BlockLevelsMask())
+	blockLevels := block.LevelsMask(header.BlockLevelsMask())
 	location := tile.Location{Offset: header.RootOffset(), Length: header.RootSize()}
 
-	maxBlockIdx := zoom.LevelIndex(blockLevels, tileID.Z)
-	for blockIdx := 0; blockIdx <= maxBlockIdx; blockIdx++ {
+	for blockRange := range blockLevels.Ranges() {
+		if tileID.Z < blockRange.Start {
+			break
+		}
 		if location.Length == 0 {
 			return location, nil
 		}
@@ -60,7 +62,7 @@ func Query(header *fbs.IndexHeader, tileID tile.ID, indexAccess index.FileAccess
 		if err != nil {
 			return tile.Location{}, err
 		}
-		nextLocation, err := QueryBlock(tileID, blockLevels, blockIdx, blockData)
+		nextLocation, err := QueryBlock(tileID, blockRange, blockData)
 		if err != nil {
 			return tile.Location{}, err
 		}
@@ -71,21 +73,21 @@ func Query(header *fbs.IndexHeader, tileID tile.ID, indexAccess index.FileAccess
 }
 
 func Read(header *fbs.IndexHeader, indexData []byte) (index.Map, error) {
-	blockLevels := zoom.LevelsFromMask(header.BlockLevelsMask())
+	blockLevels := block.LevelsMask(header.BlockLevelsMask())
 	rootLocation := tile.Location{Offset: header.RootOffset(), Length: header.RootSize()}
 
 	result := make(index.Map, len(indexData)/packed.LocationLength)
 
 	result[tile.ID{X: 0, Y: 0, Z: 0}] = packed.Pack(rootLocation)
 
-	for bIdx, blockZ := range blockLevels[:len(blockLevels)-1] {
-		innerZCount := blockLevels[bIdx+1] - blockLevels[bIdx]
-		if bIdx+1 != len(blockLevels)-1 {
-			innerZCount++ // location of the next block (blockRoot)
+	for bIdx, blockRange := range slices.Collect(blockLevels.Ranges()) {
+		blockZoomCount := blockRange.Count
+		if bIdx != blockLevels.RangesCount()-1 {
+			blockZoomCount++ // location of the next block (blockRoot)
 		}
 
-		for blockCode := range tilesCountOnZoom(blockZ) {
-			blockTileID := morton.Decode(blockCode, blockZ)
+		for blockCode := range tilesCountOnZoom(blockRange.Start) {
+			blockTileID := morton.Decode(blockCode, blockRange.Start)
 
 			blockRoot, blockRootFound := result[blockTileID]
 			if blockRootFound {
@@ -103,12 +105,12 @@ func Read(header *fbs.IndexHeader, indexData []byte) (index.Map, error) {
 			switch blockFbs.BlockType() {
 			case fbs.BlockTypeDense:
 				blockLocations = readDense(blockFbs)
-				if !validateDense(blockLocations, innerZCount) {
+				if !validateDense(blockLocations, blockZoomCount) {
 					return nil, index.ErrInvalidIndex
 				}
 			case fbs.BlockTypeSparse:
 				sparseLocations := readSparse(blockFbs)
-				if !validateSparse(sparseLocations, innerZCount) {
+				if !validateSparse(sparseLocations, blockZoomCount) {
 					return nil, index.ErrInvalidIndex
 				}
 				denseLocations, err := sparseToDense(sparseLocations)
@@ -144,56 +146,57 @@ func Write(header *fbs.IndexHeader, indexMap index.Map) ([]byte, error) {
 		maxZoom = max(maxZoom, tileID.Z)
 	}
 
-	var blockLevels zoom.Levels
+	var blockLevels block.LevelsMask
 	if maxZoom <= 8 {
-		blockLevels = []uint32{0, maxZoom + 1}
+		blockLevels = block.NewLevelsMask(0, maxZoom+1)
 	} else if maxZoom <= 15 {
-		// 9 -> [4],
+		// 9 -> [4]
 		// 10..11 -> [5]
 		// 12..13 -> [6]
 		// 14..15 -> [7]
-		blockLevels = []uint32{0, maxZoom / 2, maxZoom + 1}
+		blockLevels = block.NewLevelsMask(0, maxZoom/2, maxZoom+1)
 	} else {
 		// 16..17 -> [5, 10]
 		// 18..20 -> [6, 12]
 		// 21..24 -> [7, 14]
-		blockLevels = []uint32{0, maxZoom / 3, maxZoom / 3 * 2, maxZoom + 1}
+		blockLevels = block.NewLevelsMask(0, maxZoom/3, maxZoom/3*2, maxZoom+1)
 	}
 
 	header.MutateMagic(fbs.IndexMagicValue)
 	header.MutateFormat(fbs.IndexFormatSparse)
 	header.MutateMaxZoom(uint64(maxZoom))
-	header.MutateBlockLevelsMask(zoom.LevelsToMask(blockLevels))
+	header.MutateBlockLevelsMask(uint64(blockLevels))
 
 	result := make([]byte, 0, len(indexMap)*packed.LocationLength)
 
 	// blockIdx -> [blockTileID]
-	usedBlocks := make([]map[tile.ID]bool, len(blockLevels)-1)
+	usedBlocks := make([]map[tile.ID]bool, blockLevels.RangesCount())
 	for i := range usedBlocks {
 		usedBlocks[i] = make(map[tile.ID]bool)
 	}
 
 	for tileID := range indexMap {
-		maxBlockIdx := zoom.LevelIndex(blockLevels, tileID.Z)
-		for bIdx := 0; bIdx <= maxBlockIdx; bIdx++ {
-			blockZ := blockLevels[bIdx]
-			blockTileID := parentN(tileID, tileID.Z-blockZ)
+		for bIdx, blockRange := range slices.Collect(blockLevels.Ranges()) {
+			if tileID.Z < blockRange.Start {
+				break
+			}
+			blockTileID := parentN(tileID, tileID.Z-blockRange.Start)
 			usedBlocks[bIdx][blockTileID] = true
 		}
 	}
 
 	hashToLocation := make(map[[16]byte]packed.Location)
 
-	for bIdx := range slices.Backward(usedBlocks) {
-		innerZCount := blockLevels[bIdx+1] - blockLevels[bIdx]
-		if bIdx+1 != len(blockLevels)-1 {
-			innerZCount++ // location of the next block (blockRoot)
+	for bIdx, blockRange := range slices.Backward(slices.Collect(blockLevels.Ranges())) {
+		blockZoomCount := blockRange.Count
+		if bIdx != blockLevels.RangesCount()-1 {
+			blockZoomCount++ // location of the next block (blockRoot)
 		}
 
 		for blockTileID := range usedBlocks[bIdx] {
-			blockLocations := make([][]packed.Location, innerZCount)
+			blockLocations := make([][]packed.Location, blockZoomCount)
 
-			for innerZ := range innerZCount {
+			for innerZ := range blockZoomCount {
 				innerTilesCount := tilesCountOnZoom(innerZ)
 				blockLocations[innerZ] = make([]packed.Location, innerTilesCount)
 

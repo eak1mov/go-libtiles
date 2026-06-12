@@ -1,3 +1,4 @@
+// Package basic provides low-level implementation of WebTiles Basic index format.
 package basic
 
 import (

@@ -179,10 +179,10 @@ func sparseToDense(block []sparseLocations) ([][]packed.Location, error) {
 }
 
 func denseToSparse(blockLocations [][]packed.Location) []sparseLocations {
-	zCount := uint32(len(blockLocations))
+	zoomCount := uint32(len(blockLocations))
 
 	// z -> (tileCode -> eqClass)
-	eqClasses := make([][]uint32, zCount)
+	eqClasses := make([][]uint32, zoomCount)
 
 	for z, locations := range slices.Backward(blockLocations) {
 		tilesCount := tilesCountOnZoom(uint32(z))
@@ -212,7 +212,7 @@ func denseToSparse(blockLocations [][]packed.Location) []sparseLocations {
 				tileClass:    eqClasses[z][tileCode],
 				childClasses: [4]uint32{},
 			}
-			if uint32(z+1) < zCount {
+			if uint32(z+1) < zoomCount {
 				for childIdx := range tile.childClasses {
 					childCode := childCode(tileCode, uint32(childIdx))
 					tile.childClasses[childIdx] = eqClasses[z+1][childCode]
@@ -228,10 +228,10 @@ func denseToSparse(blockLocations [][]packed.Location) []sparseLocations {
 	}
 
 	// z -> (tileCode -> link status)
-	linkStatus := make([][]bool, zCount)
-	result := make([]sparseLocations, zCount)
+	linkStatus := make([][]bool, zoomCount)
+	result := make([]sparseLocations, zoomCount)
 
-	for z := range zCount {
+	for z := range zoomCount {
 		tilesCount := tilesCountOnZoom(z)
 		linkStatus[z] = make([]bool, tilesCount)
 

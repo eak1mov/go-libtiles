@@ -8,9 +8,10 @@ It is designed to be easy to use, efficient and to integrate smoothly into Go ap
 
 ## Features
 
-- **[MBTiles 1.3](https://github.com/mapbox/mbtiles-spec/blob/master/1.3/spec.md) Format Support.**
-- **[PMTiles v3](https://github.com/protomaps/PMTiles/blob/main/spec/v3/spec.md) Format Support.**
-- **[WebTiles 0.2](https://github.com/eak1mov/webtiles) Format Support**.
+- **Format Support**:
+  [MBTiles 1.3](https://github.com/mapbox/mbtiles-spec/blob/master/1.3/spec.md),
+  [PMTiles v3](https://github.com/protomaps/PMTiles/blob/main/spec/v3/spec.md),
+  [WebTiles 0.2](https://github.com/eak1mov/webtiles).
 - **[XYZ Directory](https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames) Support**: Read and write tiles to files with paths like `/zoom/x/y.png`.
 - **Format Conversion**: Convert between MBTiles, PMTiles, WebTiles and custom index formats.
 - **Modular Design**: Clean separation between low-level format handling and high-level APIs.

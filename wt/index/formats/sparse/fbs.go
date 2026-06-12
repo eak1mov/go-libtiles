@@ -153,8 +153,8 @@ func writeSparse(block []sparseLocations) []byte {
 	return builder.FinishedBytes()
 }
 
-func validateDense(blockLocations [][]packed.Location, zCount uint32) bool {
-	if len(blockLocations) != int(zCount) {
+func validateDense(blockLocations [][]packed.Location, zoomCount uint32) bool {
+	if len(blockLocations) != int(zoomCount) {
 		return false
 	}
 	for z, locations := range blockLocations {
@@ -165,8 +165,8 @@ func validateDense(blockLocations [][]packed.Location, zCount uint32) bool {
 	return true
 }
 
-func validateSparse(block []sparseLocations, zCount uint32) bool {
-	if len(block) != int(zCount) {
+func validateSparse(block []sparseLocations, zoomCount uint32) bool {
+	if len(block) != int(zoomCount) {
 		return false
 	}
 	for _, locations := range block {

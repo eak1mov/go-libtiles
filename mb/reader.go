@@ -1,7 +1,7 @@
-// Package mb provides API for reading tiles and metadata in MBTiles format.
+// Package mb provides API for reading and writing tiles in MBTiles format.
 //
-// Note: User must properly initialize the sqlite3 library generic driver
-// (e.g. import _ "github.com/mattn/go-sqlite3") before using this package.
+// Note: User must properly initialize the sqlite3 library generic driver before using this package.
+// e.g. import _ "github.com/mattn/go-sqlite3"
 package mb
 
 import (
