@@ -1,0 +1,15 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "basic",
+    srcs = ["format.go"],
+    importpath = "github.com/eak1mov/go-libtiles/wt/index/formats/basic",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//tile",
+        "//wt/fbs",
+        "//wt/index",
+        "//wt/index/internal/morton",
+        "//wt/index/packed",
+    ],
+)

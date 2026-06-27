@@ -1,0 +1,11 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "tile",
+    srcs = [
+        "iterators.go",
+        "tile.go",
+    ],
+    importpath = "github.com/eak1mov/go-libtiles/tile",
+    visibility = ["//visibility:public"],
+)

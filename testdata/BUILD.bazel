@@ -1,0 +1,8 @@
+load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
+
+copy_file(
+    name = "copy_testdata",
+    src = "@testdata_input//file",
+    out = "input.zip",
+    visibility = ["//:__subpackages__"],
+)

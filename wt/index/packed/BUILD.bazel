@@ -1,0 +1,23 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "packed",
+    srcs = ["location.go"],
+    importpath = "github.com/eak1mov/go-libtiles/wt/index/packed",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//tile",
+        "//wt/fbs",
+    ],
+)
+
+go_test(
+    name = "packed_test",
+    srcs = ["location_test.go"],
+    deps = [
+        ":packed",
+        "//tile",
+        "//wt/fbs",
+        "@com_github_google_go_cmp//cmp",
+    ],
+)

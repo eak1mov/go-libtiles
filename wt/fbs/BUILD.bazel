@@ -1,0 +1,11 @@
+# gazelle:ignore
+
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "fbs",
+    srcs = ["@webtiles//webtiles/fbs:go_fbs"],
+    importpath = "github.com/eak1mov/go-libtiles/wt/fbs",
+    visibility = ["//visibility:public"],
+    deps = ["@com_github_google_flatbuffers//go"],
+)

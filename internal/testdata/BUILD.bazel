@@ -1,0 +1,8 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "testdata",
+    srcs = ["testdata.go"],
+    importpath = "github.com/eak1mov/go-libtiles/internal/testdata",
+    visibility = ["//:__subpackages__"],
+)

@@ -1,0 +1,31 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "pm",
+    srcs = [
+        "header.go",
+        "reader.go",
+        "writer.go",
+    ],
+    importpath = "github.com/eak1mov/go-libtiles/pm",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/copier",
+        "//pm/spec",
+        "//tile",
+    ],
+)
+
+go_test(
+    name = "pm_test",
+    srcs = ["pm_test.go"],
+    # keep
+    data = ["//testdata:input.zip"],
+    deps = [
+        ":pm",
+        "//index",
+        "//internal/testdata",
+        "//tile",
+        "@com_github_google_go_cmp//cmp",
+    ],
+)

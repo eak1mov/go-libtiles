@@ -1,0 +1,12 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "copier",
+    srcs = ["copier.go"],
+    importpath = "github.com/eak1mov/go-libtiles/internal/copier",
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "//tile",
+        "@org_golang_x_sync//errgroup",
+    ],
+)

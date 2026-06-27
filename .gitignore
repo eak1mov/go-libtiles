@@ -5,7 +5,9 @@
 *.mbtiles
 *.pmtiles
 *.wtiles
+/bazel-*
 /convert
 /export
 /import
 /optimize
+/MODULE.bazel.lock

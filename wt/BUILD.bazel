@@ -1,0 +1,36 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "wt",
+    srcs = [
+        "reader.go",
+        "writer.go",
+    ],
+    importpath = "github.com/eak1mov/go-libtiles/wt",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/copier",
+        "//tile",
+        "//wt/fbs",
+        "//wt/index",
+        "//wt/index/formats/basic",
+        "//wt/index/formats/plain",
+        "//wt/index/formats/sparse",
+        "//wt/index/packed",
+    ],
+)
+
+go_test(
+    name = "wt_test",
+    srcs = ["wt_test.go"],
+    # keep
+    data = ["//testdata:input.zip"],
+    deps = [
+        ":wt",
+        "//index",
+        "//internal/testdata",
+        "//tile",
+        "//wt/fbs",
+        "@com_github_google_go_cmp//cmp",
+    ],
+)

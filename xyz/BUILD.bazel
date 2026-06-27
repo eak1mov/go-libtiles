@@ -1,0 +1,23 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "xyz",
+    srcs = [
+        "pattern.go",
+        "reader.go",
+        "writer.go",
+    ],
+    importpath = "github.com/eak1mov/go-libtiles/xyz",
+    visibility = ["//visibility:public"],
+    deps = ["//tile"],
+)
+
+go_test(
+    name = "xyz_test",
+    srcs = ["xyz_test.go"],
+    deps = [
+        ":xyz",
+        "//tile",
+        "@com_github_google_go_cmp//cmp",
+    ],
+)

@@ -1,0 +1,37 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "spec",
+    srcs = [
+        "compression.go",
+        "directory.go",
+        "header.go",
+        "tileid.go",
+    ],
+    importpath = "github.com/eak1mov/go-libtiles/pm/spec",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//tile",
+        "@com_github_google_hilbert//:hilbert",
+    ],
+)
+
+go_test(
+    name = "spec_test",
+    srcs = [
+        "compression_test.go",
+        "directory_test.go",
+        "header_test.go",
+        "tileid_test.go",
+    ],
+    # keep
+    data = ["//testdata:input.zip"],
+    deps = [
+        ":spec",
+        "//index",
+        "//internal/testdata",
+        "//tile",
+        "@com_github_google_go_cmp//cmp",
+        "@com_github_google_go_cmp//cmp/cmpopts",
+    ],
+)

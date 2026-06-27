@@ -1,0 +1,12 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "mb",
+    srcs = [
+        "reader.go",
+        "writer.go",
+    ],
+    importpath = "github.com/eak1mov/go-libtiles/mb",
+    visibility = ["//visibility:public"],
+    deps = ["//tile"],
+)

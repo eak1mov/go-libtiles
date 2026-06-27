@@ -1,0 +1,19 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "morton",
+    srcs = ["tileid.go"],
+    importpath = "github.com/eak1mov/go-libtiles/wt/index/internal/morton",
+    visibility = ["//wt/index:__subpackages__"],
+    deps = ["//tile"],
+)
+
+go_test(
+    name = "morton_test",
+    srcs = ["tileid_test.go"],
+    deps = [
+        ":morton",
+        "//tile",
+        "@com_github_google_go_cmp//cmp",
+    ],
+)

@@ -1,0 +1,22 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "sparse",
+    srcs = [
+        "bits.go",
+        "block.go",
+        "fbs.go",
+        "format.go",
+    ],
+    importpath = "github.com/eak1mov/go-libtiles/wt/index/formats/sparse",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//tile",
+        "//wt/fbs",
+        "//wt/index",
+        "//wt/index/block",
+        "//wt/index/internal/morton",
+        "//wt/index/packed",
+        "@com_github_google_flatbuffers//go",
+    ],
+)

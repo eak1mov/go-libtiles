@@ -146,10 +146,11 @@ go-libtiles/
 
 ## Testing
 ```bash
-# download test data:
-wget -O "testdata/input.zip" "https://github.com/eak1mov/libtiles-testdata/archive/index-v0.2.0.zip"
+# Run tests with bazel:
+bazel test //...
 
-# Run tests:
+# Download test data and run tests:
+wget -O "testdata/input.zip" "https://github.com/eak1mov/libtiles-testdata/archive/index-v0.2.0.zip"
 go test ./...
 ```
 
