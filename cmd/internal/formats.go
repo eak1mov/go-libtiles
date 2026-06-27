@@ -3,14 +3,16 @@ package internal
 import "strings"
 
 func DeduceFormat(format, filePath string) string {
-	if format == "" && strings.HasSuffix(filePath, ".mbtiles") {
+	switch {
+	case format != "":
+		return format
+	case strings.HasSuffix(filePath, ".mbtiles"):
 		return "mbtiles"
-	}
-	if format == "" && strings.HasSuffix(filePath, ".pmtiles") {
+	case strings.HasSuffix(filePath, ".pmtiles"):
 		return "pmtiles"
-	}
-	if format == "" && strings.HasSuffix(filePath, ".wtiles") {
+	case strings.HasSuffix(filePath, ".wtiles"):
 		return "wtiles"
+	default:
+		return format
 	}
-	return format
 }

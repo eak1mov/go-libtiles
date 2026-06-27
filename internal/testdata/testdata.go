@@ -1,4 +1,4 @@
-package internal
+package testdata
 
 import (
 	"archive/zip"
@@ -8,7 +8,7 @@ import (
 
 const testdataPrefix = "libtiles-testdata-index-v0.2.0"
 
-func ReadTestdata(archivePath, fileName string) ([]byte, error) {
+func Read(archivePath, fileName string) ([]byte, error) {
 	r, err := zip.OpenReader(archivePath)
 	if err != nil {
 		return nil, err

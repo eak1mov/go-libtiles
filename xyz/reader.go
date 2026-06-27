@@ -58,7 +58,7 @@ func (r *Reader) ReadTile(tileID tile.ID) ([]byte, error) {
 	return tileData, nil
 }
 
-func (r *Reader) VisitTiles(visitor func(tile.ID, []byte) error) error {
+func (r *Reader) VisitTiles(fn tile.VisitFunc) error {
 	return filepath.WalkDir(r.rootDir, func(filePath string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -82,6 +82,6 @@ func (r *Reader) VisitTiles(visitor func(tile.ID, []byte) error) error {
 			return err
 		}
 
-		return visitor(tile.ID{X: uint32(x), Y: uint32(y), Z: uint32(z)}, tileData)
+		return fn(tile.ID{X: uint32(x), Y: uint32(y), Z: uint32(z)}, tileData)
 	})
 }

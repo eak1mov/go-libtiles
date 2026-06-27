@@ -79,7 +79,7 @@ func (r *Reader) ReadTile(tileID tile.ID) ([]byte, error) {
 	return tileData, nil
 }
 
-func (r *Reader) VisitTiles(visitor func(tile.ID, []byte) error) error {
+func (r *Reader) VisitTiles(fn tile.VisitFunc) error {
 	rows, err := r.db.Query("SELECT zoom_level, tile_column, tile_row, tile_data FROM tiles")
 	if err != nil {
 		return err
@@ -96,7 +96,7 @@ func (r *Reader) VisitTiles(visitor func(tile.ID, []byte) error) error {
 
 		y = (1 << z) - 1 - y // TMS -> XYZ
 
-		if err := visitor(tile.ID{X: x, Y: y, Z: z}, tileData); err != nil {
+		if err := fn(tile.ID{X: x, Y: y, Z: z}, tileData); err != nil {
 			return err
 		}
 	}

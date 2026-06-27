@@ -137,7 +137,7 @@ func (r *Reader) ReadTile(tileID tile.ID) ([]byte, error) {
 	return r.fileAccess(location.Offset, location.Length)
 }
 
-func (r *Reader) VisitLocations(visitor func(tile.ID, tile.Location) error) error {
+func (r *Reader) VisitLocations(fn tile.LocationVisitFunc) error {
 	var traverse func(uint64, uint64) error
 	traverse = func(dirOffset, dirLength uint64) error {
 		dirEntries, err := r.readDirectory(dirOffset, dirLength)
@@ -152,7 +152,7 @@ func (r *Reader) VisitLocations(visitor func(tile.ID, tile.Location) error) erro
 						Offset: r.header.TileDataOffset + entry.Offset,
 						Length: uint64(entry.Length),
 					}
-					if err := visitor(tileID, location); err != nil {
+					if err := fn(tileID, location); err != nil {
 						return err
 					}
 				}
@@ -167,12 +167,12 @@ func (r *Reader) VisitLocations(visitor func(tile.ID, tile.Location) error) erro
 	return traverse(r.header.RootOffset, r.header.RootLength)
 }
 
-func (r *Reader) VisitTiles(visitor func(tile.ID, []byte) error) error {
+func (r *Reader) VisitTiles(fn tile.VisitFunc) error {
 	return r.VisitLocations(func(tileID tile.ID, location tile.Location) error {
 		tileData, err := r.fileAccess(location.Offset, location.Length)
 		if err != nil {
 			return err
 		}
-		return visitor(tileID, tileData)
+		return fn(tileID, tileData)
 	})
 }

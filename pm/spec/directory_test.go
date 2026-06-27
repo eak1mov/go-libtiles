@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/eak1mov/go-libtiles/index"
-	"github.com/eak1mov/go-libtiles/internal"
+	"github.com/eak1mov/go-libtiles/internal/testdata"
 	"github.com/eak1mov/go-libtiles/pm/spec"
 	gcmp "github.com/google/go-cmp/cmp"
 )
@@ -23,12 +23,12 @@ func TestDirectorySerializer(t *testing.T) {
 		t.Run(tc, func(t *testing.T) {
 			t.Parallel()
 
-			testData, err := internal.ReadTestdata("../../testdata/input.zip", tc)
+			testData, err := testdata.Read("../../testdata/input.zip", tc)
 			if err != nil {
 				t.Fatalf("failed to read test data: %v", err)
 			}
 
-			indexItems, err := index.ReadAll(testData)
+			indexItems, err := index.DecodeAll(testData)
 			if err != nil {
 				t.Fatalf("index.ReadAll failed: %v", err)
 			}

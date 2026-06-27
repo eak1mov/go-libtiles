@@ -30,11 +30,14 @@ type Reader interface {
 }
 
 type Visitor interface {
-	// VisitTiles visits all tiles in the tileset, calling the visitor for each.
+	// VisitTiles visits all tiles in the tileset, calling fn for each.
 	// It returns an error if visiting fails.
 	// Order of tiles, upfront cpu and memory consumption are implementation-defined.
-	VisitTiles(visitor func(ID, []byte) error) error
+	VisitTiles(fn VisitFunc) error
 }
+
+// VisitFunc is a callback function for processing a single tile.
+type VisitFunc func(tileID ID, tileData []byte) error
 
 // Location represents the absolute location of tile data inside a tileset file.
 type Location struct {
@@ -47,8 +50,10 @@ type LocationReader interface {
 }
 
 type LocationVisitor interface {
-	VisitLocations(visitor func(ID, Location) error) error
+	VisitLocations(fn LocationVisitFunc) error
 }
+
+type LocationVisitFunc func(tileID ID, location Location) error
 
 // Error is an error type used by this library.
 type Error string

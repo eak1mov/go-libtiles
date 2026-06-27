@@ -18,7 +18,7 @@ It is designed to be easy to use, efficient and to integrate smoothly into Go ap
 - **High Performance**: Optimized for large tile datasets.
 
 ## Installation
-Requires Go 1.24 or later, with minimal dependencies.
+Requires Go 1.26 or later, with minimal dependencies.
 
 ```bash
 go get github.com/eak1mov/go-libtiles
@@ -133,7 +133,7 @@ go-libtiles/
 │   ├── directory.go   #   Tile directory management
 │   ├── tileid.go      #   Tile coordinate encoding
 ├── wt/                # WebTiles API (Reader and Writer)
-├── wt/index/          # Low-level implementation of WebTiles index formats
+├── wt/index/formats/  # Low-level implementation of WebTiles index formats
 │   ├── basic/         #   Basic index format
 │   ├── plain/         #   Plain index format
 │   ├── sparse/        #   Sparse index format

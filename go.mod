@@ -1,6 +1,6 @@
 module github.com/eak1mov/go-libtiles
 
-go 1.24.0
+go 1.26.0
 
 require (
 	github.com/google/flatbuffers v25.12.19+incompatible

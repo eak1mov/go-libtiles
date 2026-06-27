@@ -25,7 +25,134 @@ var (
 	outputPath   = flag.String("o", "", "Output path")
 	outputFormat = flag.String("of", "", "Output format (mbtiles, pmtiles, wtiles, xyz)")
 	deduplicate  = flag.Bool("d", true, "Deduplicate tiles (for mbtiles format)")
+	disableLogs  = flag.Bool("q", false, "Disable debug logs")
 )
+
+var logger = log.Default()
+
+func main() {
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s -i <path> -o <path> [-if <format> | -of <format>]\n", os.Args[0])
+		flag.PrintDefaults()
+	}
+	flag.Parse()
+
+	if *disableLogs {
+		logger = log.New(io.Discard, "", log.LstdFlags)
+	}
+
+	if err := run(); err != nil {
+		log.Fatalln(err)
+	}
+}
+
+func run() error {
+	inputFormat := internal.DeduceFormat(*inputFormat, *inputPath)
+	outputFormat := internal.DeduceFormat(*outputFormat, *outputPath)
+
+	var err error
+	var reader tile.Visitor
+	switch inputFormat {
+	case "mbtiles":
+		reader, err = mb.NewReader(*inputPath)
+	case "pmtiles":
+		reader, err = pm.NewFileReader(*inputPath)
+	case "wtiles":
+		reader, err = wt.NewFileReader(*inputPath)
+	case "xyz", "":
+		reader, err = xyz.NewReader(*inputPath)
+	default:
+		return fmt.Errorf("invalid input format: %q", inputFormat)
+	}
+	if err != nil {
+		return err
+	}
+	if closer, ok := reader.(io.Closer); ok {
+		defer closer.Close()
+	}
+
+	var mbMetadata map[string]string
+	var pmHeaderMetadata pm.HeaderMetadata
+	var pmJsonMetadata []byte
+
+	switch inputFormat {
+	case "mbtiles":
+		mbMetadata, err = reader.(*mb.Reader).ReadMetadata()
+		if err != nil {
+			return err
+		}
+	case "pmtiles":
+		pmHeaderMetadata = reader.(*pm.Reader).HeaderMetadata()
+		pmJsonMetadata, err = reader.(*pm.Reader).ReadMetadata()
+		if err != nil {
+			return err
+		}
+	}
+
+	switch {
+	case inputFormat == "mbtiles" && outputFormat == "pmtiles":
+		pmHeaderMetadata, err = metadataMbToPm(mbMetadata)
+		if err != nil {
+			return fmt.Errorf("failed to convert metadata: %s", err)
+		}
+		jsonValue, found := mbMetadata["json"]
+		if found {
+			pmJsonMetadata = []byte(jsonValue)
+		}
+	case inputFormat == "pmtiles" && outputFormat == "mbtiles":
+		mbMetadata, err = metadataPmToMb(&pmHeaderMetadata)
+		if err != nil {
+			return fmt.Errorf("failed to convert metadata: %s", err)
+		}
+		mbMetadata["name"] = filepath.Base(*inputPath)
+	}
+
+	var writer tile.Writer
+	switch outputFormat {
+	case "mbtiles":
+		writer, err = mb.NewWriter(
+			*outputPath,
+			mb.WithMetadata(mbMetadata),
+			mb.WithDeduplication(*deduplicate),
+		)
+	case "pmtiles":
+		writer, err = pm.NewWriter(
+			*outputPath,
+			pm.WithMetadata(pmJsonMetadata),
+			pm.WithHeaderMetadata(pmHeaderMetadata),
+			pm.WithLogger(logger),
+		)
+	case "wtiles":
+		writer, err = wt.NewWriter(
+			*outputPath,
+			wt.WithLogger(logger),
+		)
+	case "xyz", "":
+		writer, err = xyz.NewWriter(*outputPath)
+	default:
+		return fmt.Errorf("invalid output format: %q", outputFormat)
+	}
+	if err != nil {
+		return err
+	}
+	if closer, ok := writer.(io.Closer); ok {
+		defer closer.Close()
+	}
+
+	bar := progressbar.DefaultBytes(-1)
+	defer bar.Close()
+
+	err = reader.VisitTiles(func(tileID tile.ID, tileData []byte) error {
+		err := writer.WriteTile(tileID, tileData)
+		bar.Add(len(tileData))
+		return err
+	})
+	if err != nil {
+		return err
+	}
+
+	return writer.Finalize()
+}
 
 func metadataMbToPm(metadata map[string]string) (pm.HeaderMetadata, error) {
 	header := pm.HeaderMetadata{}
@@ -114,130 +241,4 @@ func metadataPmToMb(pmMetadata *pm.HeaderMetadata) (map[string]string, error) {
 	}
 
 	return mbMetadata, nil
-}
-
-func run() error {
-	inputFormat := internal.DeduceFormat(*inputFormat, *inputPath)
-	outputFormat := internal.DeduceFormat(*outputFormat, *outputPath)
-
-	var err error
-	var reader tile.Visitor
-	switch inputFormat {
-	case "mbtiles":
-		reader, err = mb.NewReader(*inputPath)
-	case "pmtiles":
-		reader, err = pm.NewFileReader(*inputPath)
-	case "wtiles":
-		reader, err = wt.NewFileReader(*inputPath)
-	case "xyz", "":
-		reader, err = xyz.NewReader(*inputPath)
-	default:
-		return fmt.Errorf("invalid input format: %q", inputFormat)
-	}
-	if err != nil {
-		return err
-	}
-	if closer, ok := reader.(io.Closer); ok {
-		defer closer.Close()
-	}
-
-	var mbMetadata map[string]string
-	var pmHeaderMetadata pm.HeaderMetadata
-	var pmJsonMetadata []byte
-
-	switch inputFormat {
-	case "mbtiles":
-		mbMetadata, err = reader.(*mb.Reader).ReadMetadata()
-		if err != nil {
-			return err
-		}
-	case "pmtiles":
-		pmHeaderMetadata = reader.(*pm.Reader).HeaderMetadata()
-		pmJsonMetadata, err = reader.(*pm.Reader).ReadMetadata()
-		if err != nil {
-			return err
-		}
-	}
-
-	switch {
-	case inputFormat == "mbtiles" && outputFormat == "pmtiles":
-		pmHeaderMetadata, err = metadataMbToPm(mbMetadata)
-		if err != nil {
-			return fmt.Errorf("failed to convert metadata: %s", err)
-		}
-		jsonValue, found := mbMetadata["json"]
-		if found {
-			pmJsonMetadata = []byte(jsonValue)
-		}
-	case inputFormat == "pmtiles" && outputFormat == "mbtiles":
-		mbMetadata, err = metadataPmToMb(&pmHeaderMetadata)
-		if err != nil {
-			return fmt.Errorf("failed to convert metadata: %s", err)
-		}
-		mbMetadata["name"] = filepath.Base(*inputPath)
-	}
-
-	var writer tile.Writer
-	switch outputFormat {
-	case "mbtiles":
-		writer, err = mb.NewWriter(
-			*outputPath,
-			mb.WithMetadata(mbMetadata),
-			mb.WithDeduplication(*deduplicate),
-		)
-	case "pmtiles":
-		writer, err = pm.NewWriter(
-			*outputPath,
-			pm.WithMetadata(pmJsonMetadata),
-			pm.WithHeaderMetadata(pmHeaderMetadata),
-			pm.WithLogger(log.Default()),
-		)
-	case "wtiles":
-		writer, err = wt.NewWriter(
-			*outputPath,
-			wt.WithLogger(log.Default()),
-		)
-	case "xyz", "":
-		writer, err = xyz.NewWriter(*outputPath)
-	default:
-		return fmt.Errorf("invalid output format: %q", outputFormat)
-	}
-	if err != nil {
-		return err
-	}
-	if closer, ok := writer.(io.Closer); ok {
-		defer closer.Close()
-	}
-
-	bar := progressbar.NewOptions(-1, progressbar.OptionShowIts(), progressbar.OptionShowCount())
-	err = reader.VisitTiles(func(tileID tile.ID, tileData []byte) error {
-		err := writer.WriteTile(tileID, tileData)
-		bar.Add(1)
-		return err
-	})
-	bar.Finish()
-	fmt.Println()
-
-	if err != nil {
-		return err
-	}
-
-	if err := writer.Finalize(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func main() {
-	flag.Usage = func() {
-		fmt.Printf("Usage: %s -i <path> -o <path> [-if <format> | -of <format>]\n", os.Args[0])
-		flag.PrintDefaults()
-	}
-	flag.Parse()
-
-	if err := run(); err != nil {
-		log.Println(err)
-		os.Exit(1)
-	}
 }

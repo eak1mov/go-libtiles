@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/eak1mov/go-libtiles/index"
-	"github.com/eak1mov/go-libtiles/internal"
+	"github.com/eak1mov/go-libtiles/internal/testdata"
 	"github.com/eak1mov/go-libtiles/pm"
 	"github.com/eak1mov/go-libtiles/tile"
 	"github.com/google/go-cmp/cmp"
@@ -25,19 +25,19 @@ func TestWriterReader(t *testing.T) {
 		t.Run(tc, func(t *testing.T) {
 			t.Parallel()
 
-			testData, err := internal.ReadTestdata("../testdata/input.zip", tc)
+			testData, err := testdata.Read("../testdata/input.zip", tc)
 			if err != nil {
 				t.Fatalf("failed to read test data: %v", err)
 			}
 
-			indexItems, err := index.ReadAll(testData)
+			indexItems, err := index.DecodeAll(testData)
 			if err != nil {
 				t.Fatalf("index.ReadAll failed: %v", err)
 			}
 
-			tiles := make(map[tile.ID][]byte)
+			testTiles := make(map[tile.ID][]byte)
 			for _, item := range indexItems {
-				tiles[item.TileID()] = fmt.Appendf(nil, "%v-%v", item.Offset, item.Length)
+				testTiles[item.TileID()] = fmt.Appendf(nil, "%v-%v", item.Offset, item.Length)
 			}
 
 			filePath := filepath.Join(t.TempDir(), "tiles.pmtiles")
@@ -50,7 +50,7 @@ func TestWriterReader(t *testing.T) {
 			defer writer.Close()
 
 			for _, item := range indexItems {
-				tileData := tiles[item.TileID()]
+				tileData := testTiles[item.TileID()]
 				if err := writer.WriteTile(item.TileID(), tileData); err != nil {
 					t.Fatalf("WriteTile failed: %v", err)
 				}
@@ -74,7 +74,7 @@ func TestWriterReader(t *testing.T) {
 				t.Errorf("ReadMetadata data mismatch")
 			}
 
-			if got, want := maps.Collect(tile.IterTiles(reader)), tiles; !cmp.Equal(got, want) {
+			if got, want := maps.Collect(tile.IterTiles(reader)), testTiles; !cmp.Equal(got, want) {
 				t.Errorf("VisitTiles data mismatch")
 			}
 
@@ -83,7 +83,7 @@ func TestWriterReader(t *testing.T) {
 				if err != nil {
 					t.Fatalf("ReadTile(%v) failed: %v", item.TileID(), err)
 				}
-				if got, want := tileData, tiles[item.TileID()]; !cmp.Equal(got, want) {
+				if got, want := tileData, testTiles[item.TileID()]; !cmp.Equal(got, want) {
 					t.Fatalf("ReadTile(%v) = %v, want = %v", item.TileID(), got, want)
 				}
 			}

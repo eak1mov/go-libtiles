@@ -25,89 +25,16 @@ var (
 	outputTilesPath = flag.String("t", "", "Output tiles file path")
 )
 
-func exportTiles(reader tile.Visitor) error {
-	indexFile, err := os.Create(*outputIndexPath)
-	if err != nil {
-		return err
+func main() {
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s -i <path> -o <path> [-t <path> -if <format>]\n", os.Args[0])
+		flag.PrintDefaults()
 	}
-	defer indexFile.Close()
-	indexWriter := bufio.NewWriter(indexFile)
+	flag.Parse()
 
-	tilesFile, err := os.Create(*outputTilesPath)
-	if err != nil {
-		return err
+	if err := run(); err != nil {
+		log.Fatalln(err)
 	}
-	defer tilesFile.Close()
-	tilesWriter := bufio.NewWriter(tilesFile)
-	tilesOffset := uint64(0)
-
-	bar := progressbar.NewOptions(-1, progressbar.OptionShowIts(), progressbar.OptionShowCount())
-
-	err = reader.VisitTiles(func(tileID tile.ID, tileData []byte) error {
-		indexItem := index.Item{
-			X:      tileID.X,
-			Y:      tileID.Y,
-			Z:      tileID.Z,
-			Length: uint32(len(tileData)),
-			Offset: tilesOffset,
-		}
-
-		if err := index.WriteItem(indexWriter, indexItem); err != nil {
-			return err
-		}
-
-		if _, err := tilesWriter.Write(tileData); err != nil {
-			return err
-		}
-
-		tilesOffset += uint64(len(tileData))
-
-		bar.Add(1)
-
-		return nil
-	})
-
-	bar.Finish()
-	fmt.Println()
-
-	if err != nil {
-		return err
-	}
-
-	if err := tilesWriter.Flush(); err != nil {
-		return err
-	}
-	if err := indexWriter.Flush(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func exportLocations(reader tile.LocationVisitor) error {
-	indexFile, err := os.Create(*outputIndexPath)
-	if err != nil {
-		return err
-	}
-	defer indexFile.Close()
-
-	indexWriter := bufio.NewWriter(indexFile)
-
-	err = reader.VisitLocations(func(tileID tile.ID, tileLocation tile.Location) error {
-		return index.WriteItem(indexWriter, index.Item{
-			X:      tileID.X,
-			Y:      tileID.Y,
-			Z:      tileID.Z,
-			Length: uint32(tileLocation.Length),
-			Offset: tileLocation.Offset,
-		})
-	})
-
-	if err != nil {
-		return err
-	}
-
-	return indexWriter.Flush()
 }
 
 func run() error {
@@ -131,22 +58,87 @@ func run() error {
 		defer closer.Close()
 	}
 
-	if visitor, ok := reader.(tile.LocationVisitor); ok {
-		return exportLocations(visitor)
+	if locationReader, ok := reader.(tile.LocationVisitor); ok {
+		return exportLocations(locationReader)
 	} else {
 		return exportTiles(reader)
 	}
 }
 
-func main() {
-	flag.Usage = func() {
-		fmt.Printf("Usage: %s -i <path> -o <path> [-t <path> -if <format>]\n", os.Args[0])
-		flag.PrintDefaults()
+func exportLocations(reader tile.LocationVisitor) error {
+	indexFile, err := os.Create(*outputIndexPath)
+	if err != nil {
+		return err
 	}
-	flag.Parse()
+	defer indexFile.Close()
 
-	if err := run(); err != nil {
-		log.Println(err)
-		os.Exit(1)
+	bar := progressbar.DefaultBytes(-1)
+	defer bar.Close()
+
+	indexWriter := bufio.NewWriter(indexFile)
+	indexEncoder := index.NewEncoder(io.MultiWriter(indexWriter, bar))
+
+	if err := indexEncoder.EncodeFrom(reader); err != nil {
+		return err
 	}
+
+	return indexWriter.Flush()
+}
+
+func exportTiles(reader tile.Visitor) error {
+	indexFile, err := os.Create(*outputIndexPath)
+	if err != nil {
+		return err
+	}
+	defer indexFile.Close()
+	indexWriter := bufio.NewWriter(indexFile)
+	indexEncoder := index.NewEncoder(indexWriter)
+
+	tilesFile, err := os.Create(*outputTilesPath)
+	if err != nil {
+		return err
+	}
+	defer tilesFile.Close()
+	tilesWriter := bufio.NewWriter(tilesFile)
+	tilesOffset := uint64(0)
+
+	bar := progressbar.DefaultBytes(-1)
+	defer bar.Close()
+
+	err = reader.VisitTiles(func(tileID tile.ID, tileData []byte) error {
+		indexItem := index.Item{
+			X:      tileID.X,
+			Y:      tileID.Y,
+			Z:      tileID.Z,
+			Length: uint32(len(tileData)),
+			Offset: tilesOffset,
+		}
+
+		if err := indexEncoder.Encode(indexItem); err != nil {
+			return err
+		}
+
+		if _, err := tilesWriter.Write(tileData); err != nil {
+			return err
+		}
+
+		tilesOffset += uint64(len(tileData))
+
+		bar.Add(len(tileData))
+
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	if err := tilesWriter.Flush(); err != nil {
+		return err
+	}
+	if err := indexWriter.Flush(); err != nil {
+		return err
+	}
+
+	return nil
 }

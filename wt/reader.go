@@ -162,7 +162,7 @@ func readIndex(header *fbs.IndexHeader, indexData []byte) (index.Map, error) {
 	}
 }
 
-func (r *Reader) VisitLocations(visitor func(tile.ID, tile.Location) error) error {
+func (r *Reader) VisitLocations(fn tile.LocationVisitFunc) error {
 	indexData, err := r.fileAccess(r.fileHeader.IndexOffset(), r.fileHeader.IndexSize())
 	if err != nil {
 		return err
@@ -176,7 +176,7 @@ func (r *Reader) VisitLocations(visitor func(tile.ID, tile.Location) error) erro
 	for tileID, location := range indexMap {
 		tileLocation := packed.Unpack(location)
 		tileLocation.Offset += r.fileHeader.DataOffset()
-		if err := visitor(tileID, tileLocation); err != nil {
+		if err := fn(tileID, tileLocation); err != nil {
 			return err
 		}
 	}
@@ -184,12 +184,12 @@ func (r *Reader) VisitLocations(visitor func(tile.ID, tile.Location) error) erro
 	return nil
 }
 
-func (r *Reader) VisitTiles(visitor func(tile.ID, []byte) error) error {
+func (r *Reader) VisitTiles(fn tile.VisitFunc) error {
 	return r.VisitLocations(func(tileID tile.ID, location tile.Location) error {
 		tileData, err := r.fileAccess(location.Offset, location.Length)
 		if err != nil {
 			return err
 		}
-		return visitor(tileID, tileData)
+		return fn(tileID, tileData)
 	})
 }

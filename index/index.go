@@ -20,6 +20,16 @@ type Item struct {
 	Offset uint64
 }
 
+func NewItem(tileID tile.ID, tileLocation tile.Location) Item {
+	return Item{
+		X:      tileID.X,
+		Y:      tileID.Y,
+		Z:      tileID.Z,
+		Length: uint32(tileLocation.Length),
+		Offset: tileLocation.Offset,
+	}
+}
+
 func (i Item) TileID() tile.ID {
 	return tile.ID{X: i.X, Y: i.Y, Z: i.Z}
 }
@@ -28,15 +38,29 @@ func (i Item) TileLocation() tile.Location {
 	return tile.Location{Offset: i.Offset, Length: uint64(i.Length)}
 }
 
-func WriteItem(writer io.Writer, item Item) error {
-	return binary.Write(writer, binary.LittleEndian, item)
+type Encoder struct {
+	w io.Writer
 }
 
-func WriteAll(writer io.Writer, items []Item) error {
-	return binary.Write(writer, binary.LittleEndian, items)
+func NewEncoder(w io.Writer) *Encoder {
+	return &Encoder{w: w}
 }
 
-func ReadAll(indexData []byte) ([]Item, error) {
+func (e *Encoder) Encode(item Item) error {
+	return binary.Write(e.w, binary.LittleEndian, item)
+}
+
+func (e *Encoder) EncodeAll(items []Item) error {
+	return binary.Write(e.w, binary.LittleEndian, items)
+}
+
+func (e *Encoder) EncodeFrom(src tile.LocationVisitor) error {
+	return src.VisitLocations(func(tileID tile.ID, location tile.Location) error {
+		return e.Encode(NewItem(tileID, location))
+	})
+}
+
+func DecodeAll(indexData []byte) ([]Item, error) {
 	count := len(indexData) / binary.Size(Item{})
 	items := make([]Item, count)
 

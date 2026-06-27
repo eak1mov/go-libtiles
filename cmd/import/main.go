@@ -24,18 +24,38 @@ var (
 	inputTilesPath = flag.String("t", "", "Input tiles file path")
 	outputPath     = flag.String("o", "", "Output file path")
 	outputFormat   = flag.String("of", "", "Output file format (mbtiles, pmtiles, wtiles)")
+	sortOffsets    = flag.Bool("sort", false, "Sort by offset before writing")
+	disableLogs    = flag.Bool("q", false, "Disable debug logs")
 )
+
+var logger = log.Default()
+
+func main() {
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s -i <path> -t <path> -o <path> [-of <format>]\n", os.Args[0])
+		flag.PrintDefaults()
+	}
+	flag.Parse()
+
+	if *disableLogs {
+		logger = log.New(io.Discard, "", log.LstdFlags)
+	}
+
+	if err := run(); err != nil {
+		log.Fatalln(err)
+	}
+}
 
 func run() error {
 	indexData, err := os.ReadFile(*inputIndexPath)
 	if err != nil {
 		return err
 	}
-
-	indexItems, err := index.ReadAll(indexData)
+	indexItems, err := index.DecodeAll(indexData)
 	if err != nil {
 		return err
 	}
+	indexData = nil
 
 	tilesFile, err := os.Open(*inputTilesPath)
 	if err != nil {
@@ -43,14 +63,20 @@ func run() error {
 	}
 	defer tilesFile.Close()
 
+	if *sortOffsets {
+		slices.SortFunc(indexItems, func(a, b index.Item) int {
+			return cmp.Compare(a.Offset, b.Offset)
+		})
+	}
+
 	var writer tile.Writer
 	switch internal.DeduceFormat(*outputFormat, *outputPath) {
 	case "mbtiles":
 		writer, err = mb.NewWriter(*outputPath)
 	case "pmtiles":
-		writer, err = pm.NewWriter(*outputPath, pm.WithLogger(log.Default()))
+		writer, err = pm.NewWriter(*outputPath, pm.WithLogger(logger))
 	case "wtiles":
-		writer, err = wt.NewWriter(*outputPath, wt.WithLogger(log.Default()))
+		writer, err = wt.NewWriter(*outputPath, wt.WithLogger(logger))
 	default:
 		return fmt.Errorf("invalid output format: %q", *outputFormat)
 	}
@@ -61,16 +87,17 @@ func run() error {
 		defer closer.Close()
 	}
 
-	maxLength := slices.MaxFunc(indexItems, func(a, b index.Item) int {
-		return cmp.Compare(a.Length, b.Length)
-	}).Length
+	sumLength := int64(0)
+	maxLength := uint32(0)
+	for _, item := range indexItems {
+		sumLength += int64(item.Length)
+		maxLength = max(maxLength, item.Length)
+	}
+
+	bar := progressbar.DefaultBytes(sumLength)
+	defer bar.Close()
+
 	buffer := make([]byte, maxLength)
-
-	slices.SortFunc(indexItems, func(a, b index.Item) int {
-		return cmp.Compare(a.Offset, b.Offset)
-	})
-
-	bar := progressbar.New(len(indexItems))
 
 	for _, item := range indexItems {
 		tileData := buffer[:item.Length]
@@ -81,24 +108,8 @@ func run() error {
 		if err := writer.WriteTile(tileID, tileData); err != nil {
 			return err
 		}
-		bar.Add(1)
+		bar.Add(len(tileData))
 	}
-
-	bar.Finish()
-	fmt.Println()
 
 	return writer.Finalize()
-}
-
-func main() {
-	flag.Usage = func() {
-		fmt.Printf("Usage: %s -i <path> -t <path> -o <path> [-of <format>]\n", os.Args[0])
-		flag.PrintDefaults()
-	}
-	flag.Parse()
-
-	if err := run(); err != nil {
-		log.Println(err)
-		os.Exit(1)
-	}
 }
