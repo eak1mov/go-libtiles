@@ -6,4 +6,5 @@ require (
 	github.com/google/flatbuffers v25.12.19+incompatible
 	github.com/google/go-cmp v0.7.0
 	github.com/google/hilbert v0.0.0-20181122061418-320f2e35a565
+	golang.org/x/sync v0.21.0
 )

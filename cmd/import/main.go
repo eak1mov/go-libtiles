@@ -25,6 +25,7 @@ var (
 	outputPath     = flag.String("o", "", "Output file path")
 	outputFormat   = flag.String("of", "", "Output file format (mbtiles, pmtiles, wtiles)")
 	sortOffsets    = flag.Bool("sort", false, "Sort by offset before writing")
+	bulkMode       = flag.Bool("bulk", true, "Use bulk import")
 	disableLogs    = flag.Bool("q", false, "Disable debug logs")
 )
 
@@ -69,6 +70,35 @@ func run() error {
 		})
 	}
 
+	if *bulkMode {
+		return importBulk(indexItems, tilesFile)
+	} else {
+		return importIterative(indexItems, tilesFile)
+	}
+}
+
+func importBulk(indexItems []index.Item, tilesFile *os.File) error {
+	switch internal.DeduceFormat(*outputFormat, *outputPath) {
+	case "pmtiles":
+		return pm.Import(
+			*outputPath,
+			index.ItemsVisitor(indexItems),
+			tilesFile,
+			pm.WithLogger(logger),
+		)
+	case "wtiles":
+		return wt.Import(
+			*outputPath,
+			index.ItemsVisitor(indexItems),
+			tilesFile,
+			wt.WithLogger(logger),
+		)
+	default:
+		return fmt.Errorf("invalid output format: %q", *outputFormat)
+	}
+}
+
+func importIterative(indexItems []index.Item, tilesFile *os.File) (err error) {
 	var writer tile.Writer
 	switch internal.DeduceFormat(*outputFormat, *outputPath) {
 	case "mbtiles":

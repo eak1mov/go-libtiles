@@ -4,6 +4,7 @@ package index
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"io"
 
 	"github.com/eak1mov/go-libtiles/tile"
@@ -60,6 +61,34 @@ func (e *Encoder) EncodeFrom(src tile.LocationVisitor) error {
 	})
 }
 
+type Decoder struct {
+	r io.Reader
+}
+
+func NewDecoder(r io.Reader) *Decoder {
+	return &Decoder{r: r}
+}
+
+func (d *Decoder) Decode() (item Item, err error) {
+	err = binary.Read(d.r, binary.LittleEndian, &item)
+	return
+}
+
+func (d *Decoder) VisitLocations(fn tile.LocationVisitFunc) error {
+	for {
+		item, err := d.Decode()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		if err := fn(item.TileID(), item.TileLocation()); err != nil {
+			return err
+		}
+	}
+}
+
 func DecodeAll(indexData []byte) ([]Item, error) {
 	count := len(indexData) / binary.Size(Item{})
 	items := make([]Item, count)
@@ -70,4 +99,27 @@ func DecodeAll(indexData []byte) ([]Item, error) {
 	}
 
 	return items, nil
+}
+
+func Collect(v tile.LocationVisitor) (items []Item, err error) {
+	err = v.VisitLocations(func(tileID tile.ID, location tile.Location) error {
+		items = append(items, NewItem(tileID, location))
+		return nil
+	})
+	return
+}
+
+func ItemsVisitor(items []Item) tile.LocationVisitor {
+	return itemsVisitor(items)
+}
+
+type itemsVisitor []Item
+
+func (v itemsVisitor) VisitLocations(fn tile.LocationVisitFunc) error {
+	for _, item := range v {
+		if err := fn(item.TileID(), item.TileLocation()); err != nil {
+			return err
+		}
+	}
+	return nil
 }

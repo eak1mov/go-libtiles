@@ -2,11 +2,13 @@ package wt
 
 import (
 	"bufio"
+	"context"
 	"crypto/md5"
 	"io"
 	"log"
 	"os"
 
+	"github.com/eak1mov/go-libtiles/internal/copier"
 	"github.com/eak1mov/go-libtiles/tile"
 	"github.com/eak1mov/go-libtiles/wt/fbs"
 	"github.com/eak1mov/go-libtiles/wt/index"
@@ -66,15 +68,7 @@ func WithLogger(logger *log.Logger) WriterOption {
 	return func(c *writerConfig) { c.Logger = logger }
 }
 
-// NewWriter creates a new Writer for writing to a WebTiles file.
-// It always creates a new file and does not support appending to an existing one.
-//
-// Finalize() must be called to complete writing. Failure to do so will result
-// in a corrupted file.
-//
-// On any error during writing, the file may be left in an invalid state.
-// Close() should always be called to release file resources.
-func NewWriter(filePath string, opts ...WriterOption) (*Writer, error) {
+func prepareConfig(opts ...WriterOption) (*writerConfig, error) {
 	config := writerConfig{
 		IndexFormat: fbs.IndexFormatSparse,
 		Logger:      log.New(io.Discard, "", log.LstdFlags),
@@ -92,7 +86,23 @@ func NewWriter(filePath string, opts ...WriterOption) (*Writer, error) {
 		return nil, tile.Error("libtiles: invalid index format")
 	}
 
-	var err error
+	return &config, nil
+}
+
+// NewWriter creates a new Writer for writing to a WebTiles file.
+// It always creates a new file and does not support appending to an existing one.
+//
+// Finalize() must be called to complete writing. Failure to do so will result
+// in a corrupted file.
+//
+// On any error during writing, the file may be left in an invalid state.
+// Close() should always be called to release file resources.
+func NewWriter(filePath string, opts ...WriterOption) (*Writer, error) {
+	config, err := prepareConfig(opts...)
+	if err != nil {
+		return nil, err
+	}
+
 	file, err := os.Create(filePath)
 	if err != nil {
 		return nil, err
@@ -254,5 +264,128 @@ func (w *Writer) Finalize() error {
 	}
 
 	w.logger.Println("libtiles: done!")
+	return nil
+}
+
+// Import creates a new WebTiles tileset at the specified filePath using
+// provided tile index and metadata. It efficiently copies the corresponding
+// tile data from the given reader into the new file based on the index layout.
+// This function is primarily used to repack or optimize the internal structure
+// of existing tilesets.
+func Import(filePath string, tileIndex tile.LocationVisitor, tileDataReader io.ReaderAt, opts ...WriterOption) error {
+	cfg, err := prepareConfig(opts...)
+	if err != nil {
+		return err
+	}
+
+	headerData := make([]byte, fbs.HeaderSizeExtended)
+	header := fbs.Header{}
+	header.Init(headerData, 0)
+
+	cfg.Logger.Println("libtiles: prepare index")
+	indexMap := make(index.Map)
+	dataLocations := make([]tile.Location, 0)
+	dataLength := uint64(0)
+
+	lastOldOffset := uint64(0)
+	lastNewOffset := uint64(0)
+	isFirst := true
+
+	err = tileIndex.VisitLocations(func(tileID tile.ID, location tile.Location) error {
+		newOffset := lastNewOffset
+		if isFirst || location.Offset != lastOldOffset {
+			newOffset = dataLength
+			dataLocations = append(dataLocations, location)
+			dataLength += location.Length
+
+			lastOldOffset = location.Offset
+			lastNewOffset = newOffset
+			isFirst = false
+		}
+		indexMap[tileID] = packed.Pack(tile.Location{
+			Offset: newOffset,
+			Length: location.Length,
+		})
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	cfg.Logger.Println("libtiles: write index")
+	indexHeader := header.IndexHeader(nil)
+	indexData, err := writeIndex(indexHeader, indexMap, cfg.IndexFormat)
+	if err != nil {
+		return err
+	}
+
+	cfg.Logger.Println("libtiles: prepare header")
+	fileHeader := header.FileHeader(nil)
+	fileHeader.MutateSignature(fbs.HeaderSignatureValue)
+	fileHeader.MutateVersion(fbs.HeaderVersionV02)
+
+	offset := uint64(fbs.HeaderSizeExtended)
+
+	if len(cfg.HeaderMetadata) > 0 {
+		copy(headerData[fbs.HeaderSizeRegular:], cfg.HeaderMetadata)
+		fileHeader.MutateExtendedOffset(uint64(fbs.HeaderSizeRegular))
+		fileHeader.MutateExtendedSize(uint64(len(cfg.HeaderMetadata)))
+	}
+
+	if len(cfg.Metadata) > 0 {
+		fileHeader.MutateMetadataOffset(offset)
+		fileHeader.MutateMetadataSize(uint64(len(cfg.Metadata)))
+		offset += fileHeader.MetadataSize()
+	}
+
+	fileHeader.MutateIndexOffset(offset)
+	fileHeader.MutateIndexSize(uint64(len(indexData)))
+	offset += fileHeader.IndexSize()
+
+	fileHeader.MutateDataOffset(offset)
+	fileHeader.MutateDataSize(dataLength)
+	offset += fileHeader.DataSize()
+
+	cfg.Logger.Println("libtiles: create file")
+	file, err := os.Create(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	if err := file.Truncate(int64(offset)); err != nil {
+		return err
+	}
+
+	cfg.Logger.Println("libtiles: write header")
+	if _, err := file.Write(headerData); err != nil {
+		return err
+	}
+
+	cfg.Logger.Println("libtiles: write metadata")
+	if len(cfg.Metadata) > 0 {
+		if _, err = file.Write(cfg.Metadata); err != nil {
+			return err
+		}
+	}
+
+	cfg.Logger.Println("libtiles: write index")
+	if _, err := file.Write(indexData); err != nil {
+		return err
+	}
+	indexData = nil
+
+	cfg.Logger.Println("libtiles: write tiles")
+	c := copier.New(copier.BufferSize(min(copier.DefaultBufferSize, int(dataLength))))
+	if err := c.Copy(context.Background(), file, tileDataReader, dataLocations); err != nil {
+		return err
+	}
+
+	cfg.Logger.Println("libtiles: flush file")
+	if err := file.Sync(); err != nil {
+		return err
+	}
+
+	cfg.Logger.Println("libtiles: done!")
 	return nil
 }

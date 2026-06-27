@@ -1,6 +1,7 @@
 package wt_test
 
 import (
+	"bytes"
 	"fmt"
 	"maps"
 	"path/filepath"
@@ -108,6 +109,40 @@ func TestWriterReader(t *testing.T) {
 					}
 				}
 			})
+		}
+	}
+}
+
+func TestImport(t *testing.T) {
+	testData := []byte("xx011222")
+	testItems := []index.Item{
+		{X: 0, Y: 0, Z: 0, Length: 1, Offset: 2},
+		{X: 0, Y: 0, Z: 1, Length: 2, Offset: 3},
+		{X: 0, Y: 0, Z: 2, Length: 3, Offset: 5},
+	}
+
+	testDataReader := bytes.NewReader(testData)
+	testItemsVisitor := index.ItemsVisitor(testItems)
+
+	filePath := filepath.Join(t.TempDir(), "tiles.wtiles")
+	if err := wt.Import(filePath, testItemsVisitor, testDataReader); err != nil {
+		t.Fatalf("Import failed: %v", err)
+	}
+
+	reader, err := wt.NewFileReader(filePath)
+	if err != nil {
+		t.Fatalf("NewFileReader failed: %v", err)
+	}
+	defer reader.Close()
+
+	for _, item := range testItems {
+		want := testData[item.Offset:][:item.Length]
+		got, err := reader.ReadTile(item.TileID())
+		if err != nil {
+			t.Fatalf("ReadTile(%v) failed: %v", item.TileID(), err)
+		}
+		if !cmp.Equal(got, want) {
+			t.Fatalf("ReadTile(%v) = %s, want = %s", item.TileID(), got, want)
 		}
 	}
 }

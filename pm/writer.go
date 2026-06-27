@@ -3,6 +3,7 @@ package pm
 import (
 	"bufio"
 	"cmp"
+	"context"
 	"crypto/md5"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"slices"
 
+	"github.com/eak1mov/go-libtiles/internal/copier"
 	"github.com/eak1mov/go-libtiles/pm/spec"
 	"github.com/eak1mov/go-libtiles/tile"
 )
@@ -222,5 +224,140 @@ func (w *Writer) Finalize() error {
 	}
 
 	w.logger.Println("libtiles: done!")
+	return nil
+}
+
+func Import(filePath string, tileIndex tile.LocationVisitor, tileDataReader io.ReaderAt, opts ...WriterOption) error {
+	cfg := writerConfig{
+		Logger: log.New(io.Discard, "", log.LstdFlags),
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	cfg.Logger.Println("libtiles: prepare entries")
+	var dataLocations []tile.Location
+	var dataLength uint64
+	var entries []spec.Entry
+
+	var lastOldOffset uint64
+	var lastNewOffset uint64
+	isFirst := true
+
+	err := tileIndex.VisitLocations(func(tileID tile.ID, location tile.Location) error {
+		newOffset := lastNewOffset
+		if isFirst || location.Offset != lastOldOffset {
+			newOffset = dataLength
+			dataLocations = append(dataLocations, location)
+			dataLength += location.Length
+
+			lastOldOffset = location.Offset
+			lastNewOffset = newOffset
+			isFirst = false
+		}
+		entries = append(entries, spec.Entry{
+			TileCode:  spec.EncodeTileID(tileID),
+			Offset:    newOffset,
+			Length:    uint32(location.Length),
+			RunLength: 1,
+		})
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	cfg.Logger.Println("libtiles: sort entries")
+	slices.SortFunc(entries, func(a, b spec.Entry) int {
+		return cmp.Compare(a.TileCode, b.TileCode)
+	})
+
+	cfg.Logger.Println("libtiles: compact entries")
+	entries = spec.CompactEntries(entries)
+
+	cfg.Logger.Println("libtiles: serialize entries")
+	rootBytes, leavesBytes := spec.SerializeAll(entries, spec.CompressionGzip)
+
+	cfg.Logger.Println("libtiles: prepare metadata")
+	var metadata []byte
+	if cfg.Metadata != nil {
+		metadata, _ = spec.Compress(cfg.Metadata, spec.CompressionGzip)
+	}
+
+	cfg.Logger.Println("libtiles: prepare header")
+	header := spec.Header{
+		HeaderMagic:         spec.HeaderMagicV3,
+		Clustered:           true,
+		InternalCompression: spec.CompressionGzip,
+	}
+	cfg.HeaderMetadata.CopyToHeader(&header)
+
+	offset := uint64(spec.RootDirOffset)
+
+	header.RootOffset = offset
+	header.RootLength = uint64(len(rootBytes))
+	offset += header.RootLength
+
+	header.LeafDirectoryOffset = offset
+	header.LeafDirectoryLength = uint64(len(leavesBytes))
+	offset += header.LeafDirectoryLength
+
+	if metadata != nil {
+		header.MetadataOffset = offset
+		header.MetadataLength = uint64(len(metadata))
+		offset += header.MetadataLength
+	}
+
+	header.TileDataOffset = offset
+	header.TileDataLength = dataLength
+	offset += header.TileDataLength
+
+	headerData := spec.SerializeHeader(&header)
+
+	cfg.Logger.Println("libtiles: create file")
+	file, err := os.Create(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	if err := file.Truncate(int64(offset)); err != nil {
+		return err
+	}
+
+	cfg.Logger.Println("libtiles: write header")
+	if _, err := file.Write(headerData); err != nil {
+		return err
+	}
+
+	cfg.Logger.Println("libtiles: write root")
+	if _, err := file.Write(rootBytes); err != nil {
+		return err
+	}
+
+	cfg.Logger.Println("libtiles: write leaves")
+	if _, err := file.Write(leavesBytes); err != nil {
+		return err
+	}
+
+	cfg.Logger.Println("libtiles: write metadata")
+	if metadata != nil {
+		if _, err := file.Write(metadata); err != nil {
+			return err
+		}
+	}
+
+	cfg.Logger.Println("libtiles: write tiles")
+	c := copier.New(copier.BufferSize(min(copier.DefaultBufferSize, int(dataLength))))
+	if err := c.Copy(context.Background(), file, tileDataReader, dataLocations); err != nil {
+		return err
+	}
+
+	cfg.Logger.Println("libtiles: flush")
+	if err := file.Sync(); err != nil {
+		return err
+	}
+
+	cfg.Logger.Println("libtiles: done!")
 	return nil
 }

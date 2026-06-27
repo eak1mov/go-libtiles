@@ -98,7 +98,7 @@ func main() {
 
 ```bash
 # Build
-go build ./cmd/convert ./cmd/export ./cmd/import
+go build ./cmd/convert ./cmd/export ./cmd/import ./cmd/optimize
 
 # Convert MBTiles to PMTiles:
 ./convert -i input.mbtiles -o output.pmtiles
@@ -117,6 +117,9 @@ go build ./cmd/convert ./cmd/export ./cmd/import
 
 # Import from tile index and tiles file to PMTiles:
 ./import -i input.index -t input.tiles -o output.pmtiles
+
+# Optimize tileset based on access logs:
+./optimize -i input.pmtiles -o output.pmtiles -l tiles-2025-12-31.txt.xz
 ```
 
 ## Project Structure
