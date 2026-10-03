@@ -54,8 +54,3 @@ type LocationVisitor interface {
 }
 
 type LocationVisitFunc func(tileID ID, location Location) error
-
-// Error is an error type used by this library.
-type Error string
-
-func (e Error) Error() string { return string(e) }

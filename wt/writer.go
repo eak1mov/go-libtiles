@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/md5"
+	"errors"
 	"io"
 	"log"
 	"os"
@@ -18,9 +19,9 @@ import (
 	"github.com/eak1mov/go-libtiles/wt/index/packed"
 )
 
-const (
-	ErrInvalidTile tile.Error = "libtiles: invalid tile"
-	ErrInvalidZoom tile.Error = "libtiles: invalid zoom for selected index format"
+var (
+	ErrInvalidTile = errors.New("libtiles: invalid tile")
+	ErrInvalidZoom = errors.New("libtiles: invalid zoom for selected index format")
 )
 
 const MaxHeaderMetadataLength = int(fbs.HeaderSizeExtended - fbs.HeaderSizeRegular)
@@ -78,12 +79,12 @@ func prepareConfig(opts ...WriterOption) (*writerConfig, error) {
 	}
 
 	if len(config.HeaderMetadata) > MaxHeaderMetadataLength {
-		return nil, tile.Error("libtiles: header metadata is too large")
+		return nil, errors.New("libtiles: header metadata is too large")
 	}
 
 	_, indexFound := fbs.EnumNamesIndexFormat[config.IndexFormat]
 	if !indexFound || config.IndexFormat == fbs.IndexFormatInvalid {
-		return nil, tile.Error("libtiles: invalid index format")
+		return nil, errors.New("libtiles: invalid index format")
 	}
 
 	return &config, nil
@@ -170,7 +171,7 @@ var maxZooms = map[fbs.IndexFormat]uint32{
 // WriteTile writes a single tile to the WebTiles file.
 func (w *Writer) WriteTile(tileID tile.ID, tileData []byte) error {
 	if w.tileWriter == nil {
-		return tile.Error("libtiles: write called after finalize")
+		return errors.New("libtiles: write called after finalize")
 	}
 
 	if !tileID.Valid() || tileID.Z > MaxZoom {
@@ -213,7 +214,7 @@ func writeIndex(header *fbs.IndexHeader, indexMap index.Map, indexFormat fbs.Ind
 	case fbs.IndexFormatSparse:
 		return sparse.Write(header, indexMap)
 	default:
-		return nil, tile.Error("libtiles: invalid index format")
+		return nil, errors.New("libtiles: invalid index format")
 	}
 }
 
@@ -224,7 +225,7 @@ func writeIndex(header *fbs.IndexHeader, indexMap index.Map, indexFormat fbs.Ind
 // If Finalize returns an error, the output file may be left in a corrupted state.
 func (w *Writer) Finalize() error {
 	if w.tileWriter == nil {
-		return tile.Error("libtiles: finalize called twice")
+		return errors.New("libtiles: finalize called twice")
 	}
 
 	fileHeader := w.header.FileHeader(nil)

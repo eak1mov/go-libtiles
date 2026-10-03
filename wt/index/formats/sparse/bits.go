@@ -1,6 +1,10 @@
 package sparse
 
-import "github.com/eak1mov/go-libtiles/tile"
+import (
+	"errors"
+
+	"github.com/eak1mov/go-libtiles/tile"
+)
 
 func tilesCountOnZoom(zoom uint32) uint32 {
 	return 1 << (2 * zoom)
@@ -80,6 +84,6 @@ func combineTileIDs(rootID, innerID tile.ID) tile.ID {
 // TODO(eak1mov): remove these checks?
 func debugCheck(condition bool) {
 	if !condition {
-		panic(tile.Error("libtiles: internal error"))
+		panic(errors.New("libtiles: internal error"))
 	}
 }

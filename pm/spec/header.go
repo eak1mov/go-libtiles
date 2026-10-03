@@ -6,9 +6,8 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
-
-	"github.com/eak1mov/go-libtiles/tile"
 )
 
 type Compression uint8
@@ -73,9 +72,9 @@ const (
 	RootDirMaxLength       = HeaderRootDirMaxLength - HeaderLength
 )
 
-const (
-	ErrInvalidHeader  tile.Error = "libtiles: invalid file header"
-	ErrInvalidVersion tile.Error = "libtiles: invalid version"
+var (
+	ErrInvalidHeader  = errors.New("libtiles: invalid file header")
+	ErrInvalidVersion = errors.New("libtiles: invalid version")
 )
 
 func SerializeHeader(header *Header) []byte {

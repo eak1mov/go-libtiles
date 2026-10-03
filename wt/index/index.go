@@ -1,11 +1,13 @@
 package index
 
 import (
+	"errors"
+
 	"github.com/eak1mov/go-libtiles/tile"
 	"github.com/eak1mov/go-libtiles/wt/index/packed"
 )
 
-const ErrInvalidIndex tile.Error = "libtiles: invalid tile index"
+var ErrInvalidIndex = errors.New("libtiles: invalid tile index")
 
 type FileAccessFunc func(offset, length uint64) ([]byte, error)
 

@@ -2,6 +2,7 @@
 package wt
 
 import (
+	"errors"
 	"os"
 
 	"github.com/eak1mov/go-libtiles/tile"
@@ -17,11 +18,11 @@ import (
 // It must ensure that there are no partial reads, and handle zero-length requests correctly.
 type FileAccessFunc func(offset, length uint64) ([]byte, error)
 
-const (
-	ErrInvalidHeader  tile.Error = "libtiles: invalid file header"
-	ErrInvalidVersion tile.Error = "libtiles: invalid version"
-	ErrInvalidRequest tile.Error = "libtiles: invalid request"
-	ErrInvalidDataset tile.Error = "libtiles: invalid dataset"
+var (
+	ErrInvalidHeader  = errors.New("libtiles: invalid file header")
+	ErrInvalidVersion = errors.New("libtiles: invalid version")
+	ErrInvalidRequest = errors.New("libtiles: invalid request")
+	ErrInvalidDataset = errors.New("libtiles: invalid dataset")
 )
 
 // Reader implements tile.Reader and tile.LocationReader interfaces for WebTiles format.
