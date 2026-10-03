@@ -72,8 +72,8 @@ import (
 
 func main() {
     reader, err := mb.NewReader("input.mbtiles")
-    // reader, err := pm.NewFileReader("input.pmtiles")
-    // reader, err := wt.NewFileReader("input.wtiles")
+    // reader, err := pm.NewReader("input.pmtiles")
+    // reader, err := wt.NewReader("input.wtiles")
     // reader, err := xyz.NewReader("input/{z}/{x}/{y}.png")
     if err != nil {
         // handle error

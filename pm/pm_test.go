@@ -61,9 +61,9 @@ func TestWriterReader(t *testing.T) {
 				t.Fatalf("Finalize failed: %v", err)
 			}
 
-			reader, err := pm.NewFileReader(filePath)
+			reader, err := pm.NewReader(filePath)
 			if err != nil {
-				t.Fatalf("NewFileReader failed: %v", err)
+				t.Fatalf("NewReader failed: %v", err)
 			}
 			defer reader.Close()
 
@@ -108,9 +108,9 @@ func TestImport(t *testing.T) {
 		t.Fatalf("Import failed: %v", err)
 	}
 
-	reader, err := pm.NewFileReader(filePath)
+	reader, err := pm.NewReader(filePath)
 	if err != nil {
-		t.Fatalf("NewFileReader failed: %v", err)
+		t.Fatalf("NewReader failed: %v", err)
 	}
 	defer reader.Close()
 

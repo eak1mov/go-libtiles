@@ -38,10 +38,10 @@ type FileReader struct {
 	file *os.File
 }
 
-// NewFileReader opens a local WebTiles file and returns a Reader for it.
+// NewReader opens a local WebTiles file and returns a Reader for it.
 //
 // The returned Reader must be closed after use to release file resources.
-func NewFileReader(filePath string) (*FileReader, error) {
+func NewReader(filePath string) (*FileReader, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -53,7 +53,7 @@ func NewFileReader(filePath string) (*FileReader, error) {
 		}
 		return buffer, nil
 	}
-	reader, err := NewReader(fileAccess)
+	reader, err := NewRemoteReader(fileAccess)
 	if err != nil {
 		file.Close()
 		return nil, err
@@ -65,9 +65,9 @@ func (r *FileReader) Close() error {
 	return r.file.Close()
 }
 
-// NewReader creates a Reader using a custom file access function.
+// NewRemoteReader creates a Reader using a custom file access function.
 // This is useful for remote or in-memory access.
-func NewReader(fileAccess FileAccessFunc) (*Reader, error) {
+func NewRemoteReader(fileAccess FileAccessFunc) (*Reader, error) {
 	headerData, err := fileAccess(0, uint64(fbs.HeaderSizeExtended))
 	if err != nil {
 		return nil, err

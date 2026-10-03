@@ -57,7 +57,7 @@ func run() error {
 
 	switch inputFormat {
 	case "pmtiles":
-		r, err := pm.NewFileReader(*inputPath)
+		r, err := pm.NewReader(*inputPath)
 		if err != nil {
 			return fmt.Errorf("failed to create reader: %w", err)
 		}
@@ -87,7 +87,7 @@ func run() error {
 			)
 		}
 	case "wtiles":
-		r, err := wt.NewFileReader(*inputPath)
+		r, err := wt.NewReader(*inputPath)
 		if err != nil {
 			return fmt.Errorf("failed to create reader: %w", err)
 		}

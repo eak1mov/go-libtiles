@@ -56,9 +56,9 @@ func run() error {
 	case "mbtiles":
 		reader, err = mb.NewReader(*inputPath)
 	case "pmtiles":
-		reader, err = pm.NewFileReader(*inputPath)
+		reader, err = pm.NewReader(*inputPath)
 	case "wtiles":
-		reader, err = wt.NewFileReader(*inputPath)
+		reader, err = wt.NewReader(*inputPath)
 	case "xyz", "":
 		reader, err = xyz.NewReader(*inputPath)
 	default:
